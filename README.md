@@ -1,4 +1,4 @@
-# Besant Technologies Mock Exams
+# LMS For online Assessments
 
 A full-stack Next.js Assessment Learning Management System (LMS) designed for conducting secure, real-time mock exams and coding tests.
 
