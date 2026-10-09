@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String       @id @default(cuid())
+  email       String       @unique
+  name        String?
+  password    String
+  role        String       @default("TRAINER")
+  assessments Assessment[]
+}
+
+model Assessment {
+  id          String             @id @default(cuid())
+  title       String
+  duration    Int // in minutes
+  joinCode    String             @unique
+  status      String             @default("DRAFT") // DRAFT, PUBLISHED, COMPLETED
+  trainerId   String
+  trainer     User               @relation(fields: [trainerId], references: [id])
+  questions   Question[]
+  results     AssessmentResult[]
+  students    Student[]
+  createdAt   DateTime           @default(now())
+}
+
+model Question {
+  id           String     @id @default(cuid())
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id])
+  type         String // MCQ, CODING
+  text         String
+  options      String? // JSON string for MCQ options
+  correctAnswer String? // Answer text or index
+  marks        Int        @default(1)
+  language     String? // Python, Java, MySQL (for coding)
+}
+
+model Student {
+  id           String             @id @default(cuid())
+  name         String
+  email        String
+  mobile       String
+  assessmentId String
+  assessment   Assessment         @relation(fields: [assessmentId], references: [id])
+  results      AssessmentResult[]
+  joinedAt     DateTime           @default(now())
+
+  @@unique([email, assessmentId]) // A student can join a specific assessment once
+}
+
+model AssessmentResult {
+  id           String     @id @default(cuid())
+  studentId    String
+  student      Student    @relation(fields: [studentId], references: [id])
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id])
+  score        Int        @default(0)
+  details      String? // JSON string for individual question responses
+  completedAt  DateTime   @default(now())
+}
