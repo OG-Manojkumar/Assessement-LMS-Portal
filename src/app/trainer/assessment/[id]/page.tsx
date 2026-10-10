@@ -11,12 +11,8 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
   const [assessment, setAssessment] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showQuestionsModal, setShowQuestionsModal] = useState(false);
-  const [editingQuestion, setEditingQuestion] = useState<any>(null);
   const [selectedStudentResult, setSelectedStudentResult] = useState<any>(null);
-  const [sortBy, setSortBy] = useState("dateNew");
-  
-  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState("scoreDesc");
   
   // Edit State
   const [editTitle, setEditTitle] = useState("");
@@ -76,38 +72,28 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
 
   const maxScore = assessment.questions.reduce((total: any, q: any) => total + q.marks, 0);
 
-  const filteredAndSortedResults = [...(assessment.results || [])]
-    .filter((r: any) => {
-      const q = searchQuery.toLowerCase();
-      return (
-        r.student.name.toLowerCase().includes(q) ||
-        r.student.email.toLowerCase().includes(q) ||
-        r.student.mobile.includes(q)
-      );
-    })
-    .sort((a: any, b: any) => {
-      if (sortBy === "scoreDesc") return b.score - a.score;
-      if (sortBy === "scoreAsc") return a.score - b.score;
-      if (sortBy === "nameAsc") return a.student.name.localeCompare(b.student.name);
-      if (sortBy === "dateNew") return new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime();
-      if (sortBy === "dateOld") return new Date(a.completedAt).getTime() - new Date(b.completedAt).getTime();
-      if (sortBy === "malpractice") {
-        const vA = JSON.parse(a.details).meta?.violations || 0;
-        const vB = JSON.parse(b.details).meta?.violations || 0;
-        return vB - vA; // Highest violations first
-      }
-      return 0;
-    });
+  const sortedResults = [...(assessment.results || [])].sort((a: any, b: any) => {
+    if (sortBy === "scoreDesc") return b.score - a.score;
+    if (sortBy === "scoreAsc") return a.score - b.score;
+    if (sortBy === "nameAsc") return a.student.name.localeCompare(b.student.name);
+    if (sortBy === "dateNew") return new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime();
+    if (sortBy === "dateOld") return new Date(a.completedAt).getTime() - new Date(b.completedAt).getTime();
+    if (sortBy === "malpractice") {
+      const vA = JSON.parse(a.details).meta?.violations || 0;
+      const vB = JSON.parse(b.details).meta?.violations || 0;
+      return vB - vA; // Highest violations first
+    }
+    return 0;
+  });
 
   const handleDownloadCSV = () => {
-    if (!filteredAndSortedResults.length) return;
+    if (!sortedResults.length) return;
     
-    const headers = ["S.No", "Student Name", "Email", "Mobile", "Score", "Total Marks", "Malpractice Violations", "Date Taken"];
-    const rows = filteredAndSortedResults.map((result: any, index: number) => {
+    const headers = ["Student Name", "Email", "Mobile", "Score", "Total Marks", "Malpractice Violations", "Date Taken"];
+    const rows = sortedResults.map((result: any) => {
       const details = JSON.parse(result.details);
       const violations = details.meta?.violations || 0;
       return [
-        index + 1,
         `"${result.student.name}"`,
         `"${result.student.email}"`,
         `"${result.student.mobile}"`,
@@ -130,18 +116,18 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="p-8 max-w-6xl mx-auto">
       <header className="mb-8 flex items-center justify-between">
         <div>
-          <Link href="/trainer" className="text-indigo-600 hover:text-indigo-800 hover:underline mb-2 inline-block">&larr; Back to Dashboard</Link>
+          <Link href="/trainer" className="text-blue-600 hover:underline mb-2 inline-block">&larr; Back to Dashboard</Link>
           <div className="flex items-center space-x-4">
-            <h1 className="text-3xl font-black text-slate-900 tracking-tight">{assessment.title}</h1>
-            <span className={`px-2 py-1 text-xs font-bold rounded ${assessment.status === 'PUBLISHED' ? 'bg-green-100 text-green-800' : 'bg-slate-200 text-slate-800'}`}>
+            <h1 className="text-3xl font-bold text-gray-900">{assessment.title}</h1>
+            <span className={`px-2 py-1 text-xs font-bold rounded ${assessment.status === 'PUBLISHED' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
               {assessment.status}
             </span>
           </div>
-          <p className="text-slate-500 mt-1 font-medium">
-            Join Code: <span className="font-mono font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">{assessment.joinCode}</span> 
+          <p className="text-gray-500 mt-1">
+            Join Code: <span className="font-mono font-bold text-gray-900">{assessment.joinCode}</span> 
             <button 
               onClick={() => {
                 const url = `${window.location.origin}/?code=${assessment.joinCode}`;
@@ -164,12 +150,6 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
             Export to Excel
           </button>
           <button 
-            onClick={() => setShowQuestionsModal(true)}
-            className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-2 rounded-lg font-medium hover:bg-blue-100 transition"
-          >
-            Manage Questions
-          </button>
-          <button 
             onClick={() => setShowEditModal(true)}
             className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-50 transition"
           >
@@ -179,30 +159,21 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
       </header>
 
       <div className="mb-4 flex justify-between items-center bg-white p-4 rounded-xl border shadow-sm">
-        <h2 className="text-lg font-bold text-gray-900">Student Results ({filteredAndSortedResults.length})</h2>
-        <div className="flex items-center space-x-4">
-          <input 
-            type="text" 
-            placeholder="Search by name, email, or mobile..." 
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="border border-gray-300 rounded-lg px-4 py-1.5 text-sm text-gray-900 focus:ring-blue-500 outline-none bg-white w-64"
-          />
-          <div className="flex items-center space-x-2 border-l pl-4 border-gray-200">
-            <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Sort by:</label>
-            <select 
-              value={sortBy} 
-              onChange={(e) => setSortBy(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:ring-blue-500 outline-none bg-white"
-            >
-              <option value="scoreDesc">Highest Score</option>
-              <option value="scoreAsc">Lowest Score</option>
-              <option value="nameAsc">Student Name (A-Z)</option>
-              <option value="malpractice">Malpractice Violations</option>
-              <option value="dateNew">Recently Completed</option>
-              <option value="dateOld">Oldest Completed</option>
-            </select>
-          </div>
+        <h2 className="text-lg font-bold text-gray-900">Student Results ({sortedResults.length})</h2>
+        <div className="flex items-center space-x-3">
+          <label className="text-sm font-medium text-gray-700">Sort by:</label>
+          <select 
+            value={sortBy} 
+            onChange={(e) => setSortBy(e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 focus:ring-blue-500 outline-none bg-white"
+          >
+            <option value="scoreDesc">Highest Score</option>
+            <option value="scoreAsc">Lowest Score</option>
+            <option value="nameAsc">Student Name (A-Z)</option>
+            <option value="malpractice">Malpractice Violations</option>
+            <option value="dateNew">Recently Completed</option>
+            <option value="dateOld">Oldest Completed</option>
+          </select>
         </div>
       </div>
 
@@ -210,7 +181,6 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">S.No</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Student Name</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mobile</th>
@@ -221,20 +191,19 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {filteredAndSortedResults.length === 0 ? (
+            {sortedResults.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
-                  {searchQuery ? "No students found matching your search." : "No students have taken this assessment yet."}
+                <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                  No students have taken this assessment yet.
                 </td>
               </tr>
             ) : (
-              filteredAndSortedResults.map((result: any, index: number) => {
+              sortedResults.map((result: any) => {
                 const details = JSON.parse(result.details);
                 const violations = details.meta?.violations || 0;
                 return (
                   <tr key={result.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 text-gray-500 font-medium">{index + 1}</td>
-                    <td className="px-6 py-4 font-bold text-gray-900">{result.student.name}</td>
+                    <td className="px-6 py-4 font-medium text-gray-900">{result.student.name}</td>
                     <td className="px-6 py-4 text-gray-500">{result.student.email}</td>
                     <td className="px-6 py-4 text-gray-500">{result.student.mobile}</td>
                     <td className="px-6 py-4">
@@ -254,28 +223,9 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
                     <td className="px-6 py-4 text-gray-500 text-sm">
                       {new Date(result.completedAt).toLocaleString()}
                     </td>
-                    <td className="px-6 py-4 text-sm font-medium flex items-center space-x-3">
+                    <td className="px-6 py-4 text-sm font-medium">
                       <button onClick={() => setSelectedStudentResult({ ...result, parsedDetails: details })} className="text-blue-600 hover:text-blue-900">
                         View Answers
-                      </button>
-                      <button 
-                        onClick={async () => {
-                          if (!confirm(`Are you sure you want to delete the record for ${result.student.name}?`)) return;
-                          try {
-                            const res = await fetch("/api/students/delete", {
-                              method: "DELETE",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ id: result.id })
-                            });
-                            if (res.ok) fetchAssessment();
-                            else alert("Failed to delete record.");
-                          } catch (err) {
-                            alert("Error deleting record.");
-                          }
-                        }} 
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        Delete
                       </button>
                     </td>
                   </tr>
@@ -394,102 +344,6 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
                   </div>
                 );
               })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showQuestionsModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
-            <div className="p-6 border-b flex justify-between items-center bg-gray-50 rounded-t-xl">
-              <h2 className="text-2xl font-bold text-gray-900">Manage Questions</h2>
-              <button onClick={() => setShowQuestionsModal(false)} className="text-gray-500 hover:text-gray-800 p-2">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            
-            <div className="p-6 overflow-y-auto flex-1 space-y-4">
-              {assessment.questions.map((q: any, index: number) => (
-                <div key={q.id} className="border border-gray-200 p-4 rounded-lg bg-gray-50 flex flex-col">
-                  {editingQuestion?.id === q.id ? (
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Question Text</label>
-                        <textarea 
-                          className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-blue-500"
-                          rows={3}
-                          value={editingQuestion.text}
-                          onChange={e => setEditingQuestion({...editingQuestion, text: e.target.value})}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Correct Answer / Reference</label>
-                        <textarea 
-                          className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                          rows={3}
-                          value={editingQuestion.correctAnswer || ""}
-                          onChange={e => setEditingQuestion({...editingQuestion, correctAnswer: e.target.value})}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Marks</label>
-                        <input 
-                          className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-blue-500"
-                          type="number"
-                          value={editingQuestion.marks}
-                          onChange={e => setEditingQuestion({...editingQuestion, marks: e.target.value})}
-                        />
-                      </div>
-                      <div className="flex justify-end space-x-3 pt-2">
-                        <button 
-                          className="bg-gray-200 text-gray-800 px-4 py-2 rounded-lg font-medium hover:bg-gray-300 transition" 
-                          onClick={() => setEditingQuestion(null)}
-                        >
-                          Cancel
-                        </button>
-                        <button 
-                          className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700 transition" 
-                          disabled={isSaving}
-                          onClick={async () => {
-                            setIsSaving(true);
-                            await fetch("/api/questions/update", {
-                              method: "PUT",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify(editingQuestion)
-                            });
-                            await fetchAssessment();
-                            setEditingQuestion(null);
-                            setIsSaving(false);
-                          }}
-                        >
-                          {isSaving ? "Saving..." : "Save Changes"}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="flex justify-between items-start mb-2">
-                        <h4 className="font-bold text-gray-900">
-                          <span className="text-blue-600 mr-2">Q{index+1}.</span> 
-                          {q.text}
-                        </h4>
-                        <button 
-                          className="text-blue-600 hover:text-blue-800 bg-blue-50 px-3 py-1 rounded text-sm font-medium transition" 
-                          onClick={() => setEditingQuestion(q)}
-                        >
-                          Edit Question
-                        </button>
-                      </div>
-                      <div className="bg-white p-3 rounded border border-gray-200 mt-3">
-                        <p className="text-sm font-medium text-gray-500 mb-1">Correct Answer:</p>
-                        <pre className="text-sm text-green-700 font-mono overflow-x-auto">{q.correctAnswer || "None"}</pre>
-                      </div>
-                      <p className="text-sm text-gray-600 mt-2 font-medium">Marks: {q.marks}</p>
-                    </div>
-                  )}
-                </div>
-              ))}
             </div>
           </div>
         </div>
