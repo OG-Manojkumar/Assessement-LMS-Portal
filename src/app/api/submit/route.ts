@@ -23,6 +23,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Assessment not found" }, { status: 404 });
     }
 
+    // 1.5. Prevent Duplicate Submissions
+    const existingResult = await prisma.assessmentResult.findFirst({
+      where: {
+        studentId,
+        assessmentId
+      }
+    });
+
+    if (existingResult) {
+      return NextResponse.json({ success: true, message: "Already submitted", score: existingResult.score, result: existingResult });
+    }
+
     let totalScore = 0;
     const detailedResults: any = { meta: { violations } };
 
