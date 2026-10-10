@@ -10,20 +10,20 @@ export default async function AssessmentsPage() {
   });
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <header className="mb-8 flex justify-between items-center">
+    <div className="p-8 max-w-7xl mx-auto">
+      <header className="mb-10 flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">All Assessments</h1>
-          <p className="text-gray-500 mt-2">Manage your published assessments and view results.</p>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">All Assessments</h1>
+          <p className="text-slate-500 mt-2 font-medium">Manage your published assessments and view results.</p>
         </div>
-        <Link href="/trainer/question-bank" className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors">
+        <Link href="/trainer/question-bank" className="bg-indigo-600 text-white px-5 py-2.5 rounded-lg font-bold hover:bg-indigo-700 shadow-sm transition-all transform hover:-translate-y-0.5">
           + Create New
         </Link>
       </header>
 
-      <div className="bg-white border rounded-xl overflow-hidden shadow-sm">
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+          <thead className="bg-slate-50/80">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Join Code</th>

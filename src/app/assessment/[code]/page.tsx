@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, use, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 export default function AssessmentPage({ params }: { params: Promise<{ code: string }> }) {
@@ -16,12 +16,17 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
   
   // Results State
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [submissionResult, setSubmissionResult] = useState<any>(null);
+  const isSubmitting = useRef(false);
   
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showWarningModal, setShowWarningModal] = useState(false);
   
   // Answers state: mapping question ID to the selected option / typed code
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [selectedLanguage, setSelectedLanguage] = useState<Record<string, string>>({});
+  const [runOutputs, setRunOutputs] = useState<Record<string, string>>({});
+  const [isRunning, setIsRunning] = useState<Record<string, boolean>>({});
 
   const fetchAssessment = async () => {
     try {
@@ -46,6 +51,15 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
     const name = localStorage.getItem("currentStudentName");
     if (name) setStudentName(name);
 
+    const shuffleArray = (array: any[]) => {
+      const arr = [...array];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    };
+
     // 2. Initial Fetch
     fetchAssessment().then(assessmentData => {
       if (assessmentData) {
@@ -55,10 +69,14 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
           return;
         }
 
-        const parsedQuestions = assessmentData.questions.map((q: any) => ({
+        // Parse options and shuffle them
+        let parsedQuestions = assessmentData.questions.map((q: any) => ({
           ...q,
-          options: q.options ? JSON.parse(q.options) : []
+          options: q.options ? shuffleArray(JSON.parse(q.options)) : []
         }));
+        
+        // Shuffle the order of the questions themselves
+        parsedQuestions = shuffleArray(parsedQuestions);
         
         setAssessment({ ...assessmentData, questions: parsedQuestions });
         setTimeLeft(assessmentData.duration * 60);
@@ -67,34 +85,73 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
     });
   }, [code, router]);
 
+  const lastViolationTime = useRef(0);
+
   // Tab switch (malpractice) tracking
   useEffect(() => {
     if (!assessment || isSubmitted || !isFullscreen) return;
 
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
+    const incrementViolation = () => {
+      const now = Date.now();
+      // Only count one violation every 2 seconds to prevent blur and visibilitychange firing together and double-counting
+      if (now - lastViolationTime.current > 2000) {
+        lastViolationTime.current = now;
         setViolations(prev => {
           const newCount = prev + 1;
-          if (newCount === 1) {
-            setShowWarningModal(true);
-          }
+          if (newCount === 1) setShowWarningModal(true);
           return newCount;
         });
       }
     };
 
+    const handleVisibilityChange = () => {
+      if (document.hidden) incrementViolation();
+    };
+
+    const handleBlur = () => {
+      incrementViolation();
+    };
+
     const handleFullscreenChange = () => {
-      if (!document.fullscreenElement) {
-        // If they exit fullscreen (via ESC or tab switch), force them back to the resume screen
+      const doc = document as any;
+      if (!doc.fullscreenElement && !doc.webkitFullscreenElement && !doc.mozFullScreenElement && !doc.msFullscreenElement) {
         setIsFullscreen(false);
       }
     };
 
+    const handleContextMenu = (e: Event) => e.preventDefault();
+    const handleCopyPaste = (e: Event) => e.preventDefault();
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'v' || e.key === 'x')) {
+        e.preventDefault();
+      }
+    };
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleBlur);
     document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    document.addEventListener("mozfullscreenchange", handleFullscreenChange);
+    document.addEventListener("MSFullscreenChange", handleFullscreenChange);
+    
+    // Anti-cheat protections
+    document.addEventListener("contextmenu", handleContextMenu);
+    document.addEventListener("copy", handleCopyPaste);
+    document.addEventListener("paste", handleCopyPaste);
+    document.addEventListener("keydown", handleKeyDown);
+    
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleBlur);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("mozfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("MSFullscreenChange", handleFullscreenChange);
+      
+      document.removeEventListener("contextmenu", handleContextMenu);
+      document.removeEventListener("copy", handleCopyPaste);
+      document.removeEventListener("paste", handleCopyPaste);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [assessment, isSubmitted, isFullscreen]);
 
@@ -140,16 +197,36 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
   }, [assessment, timeLeft, isSubmitted, answers, violations]);
 
   const requestFullscreen = () => {
-    if (document.documentElement.requestFullscreen) {
-      document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(console.error);
+    const el = document.documentElement as any;
+    if (el.requestFullscreen) {
+      el.requestFullscreen().then(() => setIsFullscreen(true)).catch(console.error);
+    } else if (el.webkitRequestFullscreen) {
+      el.webkitRequestFullscreen();
+      setIsFullscreen(true);
+    } else if (el.msRequestFullscreen) {
+      el.msRequestFullscreen();
+      setIsFullscreen(true);
     } else {
       setIsFullscreen(true); // fallback
     }
   };
 
   const handleSubmitTest = async () => {
+    if (isSubmitting.current || isSubmitted) return;
+    
     const studentId = localStorage.getItem("currentStudentId");
     if (!studentId || !assessment) return;
+
+    isSubmitting.current = true;
+
+    // Inject the selected language into the student's answer before submitting
+    const finalAnswers = { ...answers };
+    for (const q of assessment.questions) {
+      if (q.type === 'CODING' && finalAnswers[q.id]) {
+        const lang = selectedLanguage[q.id] || q.language || "Python";
+        finalAnswers[q.id] = `[Language: ${lang}]\n${finalAnswers[q.id]}`;
+      }
+    }
 
     try {
       setLoading(true);
@@ -159,7 +236,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
         body: JSON.stringify({
           studentId,
           assessmentId: assessment.id,
-          answers,
+          answers: finalAnswers,
           violations
         })
       });
@@ -167,14 +244,25 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
 
+      if (data.result && data.result.details) {
+        try {
+          setSubmissionResult(JSON.parse(data.result.details));
+        } catch (e) {
+          console.error("Failed to parse result details");
+        }
+      }
+
       setIsSubmitted(true);
     } catch (err: any) {
       alert("Error submitting test: " + err.message);
     } finally {
       setLoading(false);
       localStorage.removeItem("currentStudentId");
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(console.error);
+      const doc = document as any;
+      if (doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement) {
+        if (doc.exitFullscreen) doc.exitFullscreen().catch(console.error);
+        else if (doc.webkitExitFullscreen) doc.webkitExitFullscreen();
+        else if (doc.msExitFullscreen) doc.msExitFullscreen();
       }
     }
   };
@@ -184,8 +272,8 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
 
   if (isSubmitted && assessment) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50 p-4">
-        <div className="bg-white p-12 rounded-xl shadow-lg max-w-lg text-center border border-gray-200">
+      <div className="flex h-screen bg-gray-50 p-4 justify-center items-start overflow-y-auto pt-12">
+        <div className="bg-white p-8 md:p-12 rounded-xl shadow-lg w-full max-w-3xl text-center border border-gray-200 mb-12">
           <div className="text-green-500 mb-6">
             <svg className="w-20 h-20 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -196,12 +284,42 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
           <p className="text-gray-600 mb-8">
             Your responses have been successfully saved and submitted to the trainer for evaluation.
           </p>
-          <button 
-            onClick={() => router.push("/")} 
-            className="bg-blue-600 text-white font-medium py-2 px-6 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Return to Home
-          </button>
+          
+          {submissionResult && (
+            <div className="mt-8 text-left border-t pt-8 w-full">
+              <h3 className="text-xl font-bold mb-4 text-gray-900 text-center">Your Results</h3>
+              <div className="space-y-4">
+                {assessment.questions.map((q: any, i: number) => {
+                  const res = submissionResult[q.id];
+                  if (!res) return null;
+                  
+                  return (
+                    <div key={q.id} className={`p-4 rounded-lg border ${res.isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                      <p className="font-medium text-gray-900 mb-2"><span className="font-bold">Q{i + 1}.</span> {q.text}</p>
+                      <div className="text-sm space-y-2 mt-3">
+                        {!res.isCorrect && res.feedback && (
+                          <p className="pt-2"><span className="font-semibold text-gray-700">Feedback:</span> <span className="text-gray-800">{res.feedback}</span></p>
+                        )}
+                        
+                        <div className={`font-bold mt-2 pt-2 border-t ${res.isCorrect ? 'text-green-600 border-green-200' : 'text-red-600 border-red-200'}`}>
+                          {res.isCorrect ? '✅ Correct' : '❌ Wrong'} ({res.awardedMarks}/{q.marks} Marks)
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-10">
+            <button 
+              onClick={() => router.push("/")} 
+              className="bg-blue-600 text-white font-medium py-3 px-8 rounded-lg hover:bg-blue-700 transition-colors w-full md:w-auto shadow-md"
+            >
+              Return to Home
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -275,65 +393,96 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col relative">
       {/* Assessment Header Toolbar */}
-      <header className="bg-white shadow-sm border-b px-6 py-4 flex justify-between items-center sticky top-0 z-10">
-        <div className="flex-1">
-          <h1 className="text-xl font-bold text-gray-900">{assessment.title}</h1>
-          {studentName && <p className="text-sm text-gray-500 font-medium">Candidate: <span className="text-gray-900 font-bold">{studentName}</span></p>}
+      <header className="bg-white shadow-sm px-6 py-4 flex flex-col md:flex-row justify-between items-center sticky top-0 z-20">
+        <div className="flex-1 w-full md:w-auto flex flex-col">
+          <h1 className="text-2xl font-black text-gray-900 tracking-tight">{assessment.title}</h1>
+          {studentName && <p className="text-sm text-gray-500 font-medium mt-1">Candidate: <span className="text-gray-900 font-bold bg-gray-100 px-2 py-0.5 rounded">{studentName}</span></p>}
         </div>
-        <div className="absolute left-1/2 transform -translate-x-1/2 text-center hidden md:block">
-           <h2 className="text-xl font-extrabold text-blue-600">Besant Technologies Mock Exams</h2>
+        <div className="flex-1 text-center my-4 md:my-0">
+           <h2 className="text-lg font-extrabold text-blue-600 uppercase tracking-widest">Besant Technologies</h2>
         </div>
-        <div className="flex-1 flex items-center justify-end space-x-6">
-          <div className={`text-xl font-mono font-bold ${timeLeft < 300 ? 'text-red-600' : 'text-gray-900'}`}>
-            Time Left: {formatTime(timeLeft)}
+        <div className="flex-1 w-full md:w-auto flex items-center justify-end space-x-6">
+          <div className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-mono font-bold text-lg shadow-sm border ${timeLeft < 300 ? 'bg-red-50 text-red-600 border-red-200 animate-pulse' : 'bg-gray-50 text-gray-900 border-gray-200'}`}>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <span>{formatTime(timeLeft)}</span>
           </div>
           <button 
             onClick={() => setShowSubmitConfirm(true)}
-            className="bg-green-600 text-white px-4 py-2 rounded font-medium hover:bg-green-700"
+            className="bg-green-600 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-green-700 hover:shadow-lg transition-all transform hover:-translate-y-0.5"
           >
             Submit Test
           </button>
         </div>
       </header>
+      
+      {/* Progress Bar */}
+      <div className="w-full bg-gray-200 h-1.5 sticky top-[88px] z-10">
+        <div 
+          className="bg-blue-600 h-1.5 transition-all duration-500 ease-out" 
+          style={{ width: `${(Object.keys(answers).length / assessment.questions.length) * 100}%` }}
+        ></div>
+      </div>
 
       {/* Questions Scroll View */}
-      <main className="flex-1 p-6 overflow-y-auto">
-        <div className="max-w-4xl mx-auto space-y-8 pb-20">
+      <main className="flex-1 p-4 md:p-8 overflow-y-auto">
+        <div className="max-w-4xl mx-auto space-y-10 pb-20">
           {assessment.questions.map((q: any, index: number) => (
-            <div key={q.id} className="bg-white p-8 rounded-xl shadow-sm border border-gray-200">
+            <div key={q.id} className="bg-white p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow border border-gray-200 relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
               <div className="flex justify-between items-start mb-6">
-                <h3 className="text-lg font-medium text-gray-900">
-                  <span className="text-blue-600 mr-2">Q{index + 1}.</span> 
+                <h3 className="text-lg font-medium text-gray-900 leading-relaxed">
+                  <span className="text-blue-600 font-bold mr-2 text-xl">Q{index + 1}.</span> 
                   {q.text}
                 </h3>
-                <span className="text-sm font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                <span className="text-xs font-bold text-gray-500 bg-gray-100 px-3 py-1.5 rounded-full whitespace-nowrap ml-4">
                   {q.marks} {q.marks === 1 ? 'Mark' : 'Marks'}
                 </span>
               </div>
 
               {q.type === 'MCQ' ? (
-                <div className="space-y-3">
-                  {q.options.map((opt: string, i: number) => (
-                    <label key={i} className={`flex items-center p-4 border rounded-lg cursor-pointer transition-colors ${answers[q.id] === opt ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                      <input 
-                        type="radio" 
-                        name={`question-${q.id}`} 
-                        value={opt}
-                        checked={answers[q.id] === opt}
-                        onChange={(e) => setAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
-                        className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-                      />
-                      <span className="ml-3 text-gray-700">{opt}</span>
-                    </label>
-                  ))}
+                <div className="space-y-3 mt-4">
+                  {q.options.map((opt: string, i: number) => {
+                    const isSelected = answers[q.id] === opt;
+                    return (
+                      <label key={i} className={`flex items-center p-4 border-2 rounded-xl cursor-pointer transition-all duration-200 ${isSelected ? 'border-blue-500 bg-blue-50/50 shadow-sm' : 'border-gray-100 hover:border-gray-300 hover:bg-gray-50'}`}>
+                        <div className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center mr-4 ${isSelected ? 'border-blue-600 bg-blue-600' : 'border-gray-300'}`}>
+                          {isSelected && <div className="w-2 h-2 bg-white rounded-full"></div>}
+                        </div>
+                        <input 
+                          type="radio" 
+                          name={`question-${q.id}`} 
+                          value={opt}
+                          checked={isSelected}
+                          onChange={(e) => setAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                          className="hidden"
+                        />
+                        <span className={`text-base ${isSelected ? 'text-blue-900 font-medium' : 'text-gray-700'}`}>{opt}</span>
+                      </label>
+                    );
+                  })}
                 </div>
               ) : (
-                <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <label className="block text-sm font-medium text-gray-700">Write your code here:</label>
-                    {q.language && (
-                      <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">{q.language}</span>
-                    )}
+                <div className="mt-4 bg-gray-900 rounded-xl overflow-hidden border border-gray-800 shadow-inner">
+                  <div className="flex justify-between items-center px-4 py-3 bg-gray-950 border-b border-gray-800">
+                    <div className="flex space-x-2">
+                      <div className="w-3 h-3 rounded-full bg-red-500/80"></div>
+                      <div className="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+                      <div className="w-3 h-3 rounded-full bg-green-500/80"></div>
+                    </div>
+                    <div className="flex items-center space-x-3">
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Language:</span>
+                      <select 
+                        value={selectedLanguage[q.id] || q.language || "Python"} 
+                        onChange={(e) => setSelectedLanguage(prev => ({ ...prev, [q.id]: e.target.value }))}
+                        className="text-xs font-bold text-white bg-gray-800 border border-gray-700 rounded px-3 py-1 outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer appearance-none"
+                      >
+                        <option value="Python">Python</option>
+                        <option value="Java">Java</option>
+                        <option value="SQL">SQL</option>
+                        <option value="C++">C++</option>
+                        <option value="JavaScript">JavaScript</option>
+                      </select>
+                    </div>
                   </div>
                   <textarea
                     value={answers[q.id] || ""}
@@ -345,20 +494,58 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
                         const start = target.selectionStart;
                         const end = target.selectionEnd;
                         const value = target.value;
-                        // Insert 4 spaces
                         const newValue = value.substring(0, start) + "    " + value.substring(end);
                         setAnswers(prev => ({ ...prev, [q.id]: newValue }));
-                        
-                        // Move cursor right after the inserted spaces (setTimeout needed for React state update)
-                        setTimeout(() => {
-                          target.selectionStart = target.selectionEnd = start + 4;
-                        }, 0);
+                        setTimeout(() => { target.selectionStart = target.selectionEnd = start + 4; }, 0);
                       }
                     }}
-                    className="w-full h-48 p-4 font-mono text-sm bg-gray-50 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 outline-none resize-y text-gray-900"
-                    placeholder="// Your solution..."
+                    className="w-full h-64 p-5 font-mono text-sm bg-transparent text-gray-100 outline-none resize-y placeholder-gray-600 leading-relaxed"
+                    placeholder="// Write your solution here..."
                     spellCheck="false"
                   ></textarea>
+                  <div className="p-4 bg-gray-950 border-t border-gray-800 flex flex-col items-end">
+                    <button 
+                      onClick={async () => {
+                        const lang = selectedLanguage[q.id] || q.language || "Python";
+                        const code = answers[q.id];
+                        if (!code) return;
+                        
+                        setRunOutputs(prev => ({ ...prev, [q.id]: "Compiling and running..." }));
+                        setIsRunning(prev => ({ ...prev, [q.id]: true }));
+                        
+                        try {
+                          const res = await fetch("/api/run-code", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ code, language: lang, questionText: q.text })
+                          });
+                          const data = await res.json();
+                          setRunOutputs(prev => ({ ...prev, [q.id]: data.output || "No output." }));
+                        } catch (e) {
+                          setRunOutputs(prev => ({ ...prev, [q.id]: "Error running code." }));
+                        }
+                        setIsRunning(prev => ({ ...prev, [q.id]: false }));
+                      }}
+                      disabled={isRunning[q.id] || !answers[q.id]}
+                      className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-bold hover:bg-blue-500 transition disabled:opacity-50 flex items-center space-x-2"
+                    >
+                      {isRunning[q.id] ? (
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      )}
+                      <span>{isRunning[q.id] ? "Running..." : "Run Code"}</span>
+                    </button>
+                    {runOutputs[q.id] && (
+                      <div className="mt-4 w-full bg-black text-green-400 p-5 rounded-xl font-mono text-sm overflow-x-auto whitespace-pre-wrap text-left border border-gray-800 shadow-inner">
+                        <div className="flex items-center space-x-2 text-gray-500 text-xs mb-3 uppercase tracking-wider font-bold">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                          <span>Terminal Output</span>
+                        </div>
+                        {runOutputs[q.id]}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
