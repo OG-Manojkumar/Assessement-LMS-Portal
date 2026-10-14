@@ -44,6 +44,7 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
   };
 
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+  const [attendanceFilter, setAttendanceFilter] = useState<"ALL" | "ATTENDING" | "WAITING" | "RESUME" | "COMPLETED">("ALL");
 
   useEffect(() => {
     fetchAssessment();
@@ -237,13 +238,43 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
     document.body.removeChild(link);
   };
 
-  const pendingResumeRequests = (assessment.students || []).filter(
+  const allJoinedStudents = assessment.students || [];
+
+  const pendingResumeRequests = allJoinedStudents.filter(
     (s: any) => s.status === "RESUME_REQUESTED"
   );
 
-  const activeStudents = (assessment.students || []).filter(
-    (s: any) => (!s.results || s.results.length === 0) && s.status !== "COMPLETED"
+  const attendingStudents = allJoinedStudents.filter(
+    (s: any) => (!s.results || s.results.length === 0) && s.status !== "COMPLETED" && (s.status === "IN_PROGRESS" || s.hasStarted)
   );
+
+  const waitingStudents = allJoinedStudents.filter(
+    (s: any) => (!s.results || s.results.length === 0) && s.status !== "COMPLETED" && !s.hasStarted && s.status !== "RESUME_REQUESTED" && s.status !== "RESUME_REJECTED"
+  );
+
+  const resumeNeededStudents = allJoinedStudents.filter(
+    (s: any) => s.status === "RESUME_REQUESTED"
+  );
+
+  const completedStudents = allJoinedStudents.filter(
+    (s: any) => (s.results && s.results.length > 0) || s.status === "COMPLETED"
+  );
+
+  const filteredAttendanceStudents = allJoinedStudents.filter((s: any) => {
+    if (attendanceFilter === "ATTENDING") {
+      return (!s.results || s.results.length === 0) && s.status !== "COMPLETED" && (s.status === "IN_PROGRESS" || s.hasStarted);
+    }
+    if (attendanceFilter === "WAITING") {
+      return (!s.results || s.results.length === 0) && s.status !== "COMPLETED" && !s.hasStarted && s.status !== "RESUME_REQUESTED" && s.status !== "RESUME_REJECTED";
+    }
+    if (attendanceFilter === "RESUME") {
+      return s.status === "RESUME_REQUESTED";
+    }
+    if (attendanceFilter === "COMPLETED") {
+      return (s.results && s.results.length > 0) || s.status === "COMPLETED";
+    }
+    return true; // "ALL"
+  });
 
   const getDraftCount = (draftAnswersJson: string | null) => {
     if (!draftAnswersJson) return 0;
@@ -271,6 +302,12 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
     if (diffSecs < 120) return "🟡 1m ago";
     if (diffSecs < 3600) return `🟡 ${Math.floor(diffSecs / 60)}m ago`;
     return `🔴 Offline (${Math.floor(diffSecs / 3600)}h ago)`;
+  };
+
+  const formatJoinedTime = (dateStr: string | null) => {
+    if (!dateStr) return "-";
+    const d = new Date(dateStr);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   return (
@@ -404,34 +441,196 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
         </div>
       )}
 
-      {/* Active Sessions & Resume Control Table */}
-      {activeStudents.length > 0 && (
-        <div className="mb-8 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex justify-between items-center mb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
-                <span>Active Exam Sessions & Resume Control</span>
-                <span className="bg-indigo-100 text-indigo-800 text-xs px-2.5 py-0.5 rounded-full font-bold">
-                  {activeStudents.length} Active
-                </span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Students currently taking the test, waiting to start, or paused due to power/network interruptions.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+      {/* Student Attendance & Live Exam Monitoring Section */}
+      <div className="mb-8 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+          <div>
+            <h2 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2.5">
+              <span>👥 Student Attendance &amp; Live Monitoring</span>
+              <span className="bg-indigo-100 text-indigo-800 text-xs px-2.5 py-0.5 rounded-full font-bold">
+                {allJoinedStudents.length} Joined
+              </span>
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Real-time attendance of all students who joined with the code and are attending the exam.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-full">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-              Auto-updating live
+              Live Sync (Auto-refreshes every 5s)
+            </span>
+          </div>
+        </div>
+
+        {/* 5 KPI Summary Cards (Clickable Filter Controls) */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+          <div 
+            onClick={() => setAttendanceFilter("ALL")}
+            className={`p-3.5 rounded-xl border transition cursor-pointer ${
+              attendanceFilter === "ALL" 
+                ? 'bg-slate-900 text-white border-slate-900 shadow-md' 
+                : 'bg-slate-50 border-slate-200 hover:border-slate-300 text-slate-900'
+            }`}
+          >
+            <div className={`text-[11px] font-bold uppercase tracking-wider ${attendanceFilter === "ALL" ? 'text-slate-300' : 'text-slate-500'}`}>
+              Total Joined
+            </div>
+            <div className="text-2xl font-black mt-1">{allJoinedStudents.length}</div>
+            <div className={`text-[10px] mt-0.5 ${attendanceFilter === "ALL" ? 'text-slate-400' : 'text-slate-500'}`}>
+              All registered
             </div>
           </div>
 
+          <div 
+            onClick={() => setAttendanceFilter("ATTENDING")}
+            className={`p-3.5 rounded-xl border transition cursor-pointer ${
+              attendanceFilter === "ATTENDING" 
+                ? 'bg-emerald-600 text-white border-emerald-600 shadow-md ring-2 ring-emerald-300' 
+                : 'bg-emerald-50 border-emerald-200 hover:border-emerald-300 text-emerald-950'
+            }`}
+          >
+            <div className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider">
+              <span className={`w-2 h-2 rounded-full ${attendanceFilter === "ATTENDING" ? 'bg-white' : 'bg-emerald-500'} animate-ping`}></span>
+              <span>Attending Now</span>
+            </div>
+            <div className="text-2xl font-black mt-1">{attendingStudents.length}</div>
+            <div className={`text-[10px] mt-0.5 ${attendanceFilter === "ATTENDING" ? 'text-emerald-100' : 'text-emerald-700 font-medium'}`}>
+              Actively in exam
+            </div>
+          </div>
+
+          <div 
+            onClick={() => setAttendanceFilter("WAITING")}
+            className={`p-3.5 rounded-xl border transition cursor-pointer ${
+              attendanceFilter === "WAITING" 
+                ? 'bg-amber-600 text-white border-amber-600 shadow-md ring-2 ring-amber-300' 
+                : 'bg-amber-50 border-amber-200 hover:border-amber-300 text-amber-950'
+            }`}
+          >
+            <div className="text-[11px] font-bold uppercase tracking-wider">Waiting to Start</div>
+            <div className="text-2xl font-black mt-1">{waitingStudents.length}</div>
+            <div className={`text-[10px] mt-0.5 ${attendanceFilter === "WAITING" ? 'text-amber-100' : 'text-amber-700 font-medium'}`}>
+              Joined, not started
+            </div>
+          </div>
+
+          <div 
+            onClick={() => setAttendanceFilter("RESUME")}
+            className={`p-3.5 rounded-xl border transition cursor-pointer ${
+              attendanceFilter === "RESUME" 
+                ? 'bg-rose-600 text-white border-rose-600 shadow-md ring-2 ring-rose-300' 
+                : 'bg-rose-50 border-rose-200 hover:border-rose-300 text-rose-950'
+            }`}
+          >
+            <div className="text-[11px] font-bold uppercase tracking-wider">Needs Resume</div>
+            <div className="text-2xl font-black mt-1">{resumeNeededStudents.length}</div>
+            <div className={`text-[10px] mt-0.5 ${attendanceFilter === "RESUME" ? 'text-rose-100' : 'text-rose-700 font-medium'}`}>
+              Interrupted sessions
+            </div>
+          </div>
+
+          <div 
+            onClick={() => setAttendanceFilter("COMPLETED")}
+            className={`p-3.5 rounded-xl border transition cursor-pointer ${
+              attendanceFilter === "COMPLETED" 
+                ? 'bg-blue-600 text-white border-blue-600 shadow-md ring-2 ring-blue-300' 
+                : 'bg-blue-50 border-blue-200 hover:border-blue-300 text-blue-950'
+            }`}
+          >
+            <div className="text-[11px] font-bold uppercase tracking-wider">Completed</div>
+            <div className="text-2xl font-black mt-1">{completedStudents.length}</div>
+            <div className={`text-[10px] mt-0.5 ${attendanceFilter === "COMPLETED" ? 'text-blue-100' : 'text-blue-700 font-medium'}`}>
+              Submitted tests
+            </div>
+          </div>
+        </div>
+
+        {/* Tab Filters */}
+        <div className="flex items-center space-x-1.5 border-b border-slate-200 pb-3 mb-4 overflow-x-auto text-xs font-bold">
+          <button
+            onClick={() => setAttendanceFilter("ALL")}
+            className={`px-3 py-1.5 rounded-lg transition whitespace-nowrap ${
+              attendanceFilter === "ALL" ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            All Joined Students ({allJoinedStudents.length})
+          </button>
+          <button
+            onClick={() => setAttendanceFilter("ATTENDING")}
+            className={`px-3 py-1.5 rounded-lg transition whitespace-nowrap flex items-center gap-1.5 ${
+              attendanceFilter === "ATTENDING" ? 'bg-emerald-600 text-white' : 'text-emerald-700 hover:bg-emerald-50'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+            Attending Now ({attendingStudents.length})
+          </button>
+          <button
+            onClick={() => setAttendanceFilter("WAITING")}
+            className={`px-3 py-1.5 rounded-lg transition whitespace-nowrap ${
+              attendanceFilter === "WAITING" ? 'bg-amber-600 text-white' : 'text-amber-700 hover:bg-amber-50'
+            }`}
+          >
+            Joined - Waiting to Start ({waitingStudents.length})
+          </button>
+          <button
+            onClick={() => setAttendanceFilter("RESUME")}
+            className={`px-3 py-1.5 rounded-lg transition whitespace-nowrap ${
+              attendanceFilter === "RESUME" ? 'bg-rose-600 text-white' : 'text-rose-700 hover:bg-rose-50'
+            }`}
+          >
+            Interrupted / Needs Resume ({resumeNeededStudents.length})
+          </button>
+          <button
+            onClick={() => setAttendanceFilter("COMPLETED")}
+            className={`px-3 py-1.5 rounded-lg transition whitespace-nowrap ${
+              attendanceFilter === "COMPLETED" ? 'bg-blue-600 text-white' : 'text-blue-700 hover:bg-blue-50'
+            }`}
+          >
+            Completed ({completedStudents.length})
+          </button>
+        </div>
+
+        {/* Attendance List Table */}
+        {allJoinedStudents.length === 0 ? (
+          <div className="text-center py-12 px-4 border border-dashed border-slate-300 rounded-xl bg-slate-50">
+            <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mx-auto mb-3">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+            </div>
+            <h3 className="text-base font-bold text-slate-800">No students have joined yet</h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 mb-4">
+              Share the Join Code <span className="font-mono font-bold text-slate-900 bg-slate-200 px-1.5 py-0.5 rounded">{assessment.joinCode}</span> with students. Once they enter their details, their attendance status and live exam progress will show up here automatically!
+            </p>
+            <button
+              onClick={() => {
+                const url = `${window.location.origin}/?code=${assessment.joinCode}`;
+                navigator.clipboard.writeText(url);
+                alert("Invite link copied to clipboard!");
+              }}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow transition"
+            >
+              📋 Copy Student Invite Link
+            </button>
+          </div>
+        ) : filteredAttendanceStudents.length === 0 ? (
+          <div className="text-center py-8 text-slate-500 text-xs">
+            No students found in the &quot;{attendanceFilter}&quot; category.{" "}
+            <button 
+              onClick={() => setAttendanceFilter("ALL")} 
+              className="text-blue-600 underline font-bold ml-1"
+            >
+              Show all {allJoinedStudents.length} joined students
+            </button>
+          </div>
+        ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50">
                 <tr>
-                  <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Student</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Session Status</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Saved Drafts</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Student Details</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Joined At</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Attendance Status</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Exam Progress</th>
                   <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Time Left</th>
                   <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Violations</th>
                   <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Activity</th>
@@ -439,50 +638,86 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {activeStudents.map((s: any) => {
+                {filteredAttendanceStudents.map((s: any) => {
                   const draftCount = getDraftCount(s.draftAnswers);
+                  const isCompleted = (s.results && s.results.length > 0) || s.status === "COMPLETED";
+                  const isAttending = !isCompleted && (s.status === "IN_PROGRESS" || s.hasStarted);
+                  const isWaiting = !isCompleted && !s.hasStarted && s.status !== "RESUME_REQUESTED" && s.status !== "RESUME_REJECTED";
+                  const resultScore = s.results?.[0]?.score;
+                  const progressPercent = Math.min(100, Math.round((draftCount / (assessment.questions.length || 1)) * 100));
+
                   return (
                     <tr key={s.id} className="hover:bg-slate-50 transition">
                       <td className="px-4 py-3">
                         <div className="font-bold text-slate-900">{s.name}</div>
                         <div className="text-xs text-slate-500">{s.email} • {s.mobile}</div>
                       </td>
+                      <td className="px-4 py-3 text-xs font-semibold text-slate-600 whitespace-nowrap">
+                        {formatJoinedTime(s.joinedAt)}
+                      </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {s.status === "RESUME_REQUESTED" && (
+                        {isAttending && (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                            Attending (In Exam)
+                          </span>
+                        )}
+                        {isWaiting && (
                           <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                            🟡 Joined (Waiting to Start)
+                          </span>
+                        )}
+                        {s.status === "RESUME_REQUESTED" && (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-900 border border-rose-300 animate-pulse">
                             ⚠️ Resume Requested
                           </span>
                         )}
-                        {s.status === "RESUME_APPROVED" && (
+                        {s.status === "RESUME_APPROVED" && !isCompleted && (
                           <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">
                             ✅ Allowed to Resume
                           </span>
                         )}
                         {s.status === "RESUME_REJECTED" && (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-slate-200 text-slate-700 border border-slate-300">
                             ⛔ Resume Declined
                           </span>
                         )}
-                        {s.status === "IN_PROGRESS" && (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                            🟢 In Exam
-                          </span>
-                        )}
-                        {(s.status === "NOT_STARTED" || !s.status) && (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700">
-                            ⚪ Waiting to Start
+                        {isCompleted && (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-300">
+                            🏁 Completed
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 font-medium text-slate-700">
-                        {draftCount > 0 ? (
-                          <span className="font-bold text-indigo-600">{draftCount} / {assessment.questions.length} saved</span>
+                      <td className="px-4 py-3 text-xs">
+                        {isCompleted ? (
+                          <span className="font-bold text-slate-900">
+                            Final Score: <span className="text-blue-600">{resultScore ?? 0}</span> / {maxScore}
+                          </span>
+                        ) : isAttending ? (
+                          <div className="w-32">
+                            <div className="flex justify-between font-bold text-slate-700 mb-1">
+                              <span>{draftCount} / {assessment.questions.length} saved</span>
+                              <span>{progressPercent}%</span>
+                            </div>
+                            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                              <div 
+                                className="bg-emerald-500 h-1.5 rounded-full transition-all duration-300" 
+                                style={{ width: `${progressPercent}%` }}
+                              ></div>
+                            </div>
+                          </div>
                         ) : (
-                          <span className="text-slate-400">0 saved</span>
+                          <span className="text-slate-400 font-medium">Not started yet</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-slate-700 font-medium whitespace-nowrap">
-                        {formatTimeRemaining(s.timeLeft)}
+                      <td className="px-4 py-3 text-slate-700 font-medium text-xs whitespace-nowrap">
+                        {isCompleted ? (
+                          <span className="text-slate-400">Submitted</span>
+                        ) : isAttending ? (
+                          <span className="font-bold text-indigo-700">{formatTimeRemaining(s.timeLeft)}</span>
+                        ) : (
+                          <span className="text-slate-500">{assessment.duration}m (full)</span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {s.violations > 0 ? (
@@ -494,10 +729,14 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
                         )}
                       </td>
                       <td className="px-4 py-3 text-xs font-medium text-slate-600 whitespace-nowrap">
-                        {formatLastActive(s.lastHeartbeat)}
+                        {isCompleted ? (
+                          <span className="text-slate-400">Finished</span>
+                        ) : (
+                          formatLastActive(s.lastHeartbeat)
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end space-x-2">
+                        <div className="flex items-center justify-end space-x-1.5">
                           {s.status === "RESUME_REQUESTED" && (
                             <>
                               <button
@@ -525,7 +764,7 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
                               Allow Resume
                             </button>
                           )}
-                          {s.status === "RESUME_APPROVED" && (
+                          {s.status === "RESUME_APPROVED" && !isCompleted && (
                             <button
                               onClick={() => handleResumeAction(s.id, "REJECT")}
                               disabled={actionLoading[s.id]}
@@ -534,18 +773,35 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
                               Revoke
                             </button>
                           )}
-                          <button
-                            onClick={() => {
-                              if (confirm(`Reset session for ${s.name}? This will clear all draft answers and start their exam afresh.`)) {
-                                handleResumeAction(s.id, "RESET");
-                              }
-                            }}
-                            disabled={actionLoading[s.id]}
-                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded border border-slate-300 transition disabled:opacity-50"
-                            title="Reset student session"
-                          >
-                            Reset
-                          </button>
+                          {!isCompleted && (
+                            <button
+                              onClick={() => {
+                                if (confirm(`Reset session for ${s.name}? This will clear all draft answers and start their exam afresh.`)) {
+                                  handleResumeAction(s.id, "RESET");
+                                }
+                              }}
+                              disabled={actionLoading[s.id]}
+                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded border border-slate-300 transition disabled:opacity-50"
+                              title="Reset student session"
+                            >
+                              Reset
+                            </button>
+                          )}
+                          {isCompleted && s.results?.[0] && (
+                            <button
+                              onClick={() => {
+                                const res = s.results[0];
+                                setSelectedStudentResult({
+                                  ...res,
+                                  student: s,
+                                  parsedDetails: JSON.parse(res.details)
+                                });
+                              }}
+                              className="px-2.5 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 text-xs font-bold rounded transition"
+                            >
+                              View Submission
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -554,8 +810,8 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       <div className="mb-4 flex justify-between items-center bg-white p-4 rounded-xl border shadow-sm">
         <h2 className="text-lg font-bold text-gray-900">Student Results ({filteredAndSortedResults.length})</h2>
