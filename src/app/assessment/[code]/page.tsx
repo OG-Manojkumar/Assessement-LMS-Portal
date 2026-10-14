@@ -34,6 +34,27 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
   const [hasStartedExam, setHasStartedExam] = useState(false);
   const hasStartedExamRef = useRef(false);
 
+  // Resume & crash recovery state
+  const [sessionStatus, setSessionStatus] = useState<string>("NOT_STARTED");
+  const [isResumedSession, setIsResumedSession] = useState(false);
+  const [resumeAnswersCount, setResumeAnswersCount] = useState(0);
+
+  const answersRef = useRef<Record<string, string>>({});
+  const timeLeftRef = useRef(0);
+  const violationsRef = useRef(0);
+
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
+
+  useEffect(() => {
+    timeLeftRef.current = timeLeft;
+  }, [timeLeft]);
+
+  useEffect(() => {
+    violationsRef.current = violations;
+  }, [violations]);
+
   const fetchAssessment = async () => {
     try {
       const res = await fetch(`/api/assessments/${code}`);
@@ -66,30 +87,109 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
       return arr;
     };
 
-    // 2. Initial Fetch
-    fetchAssessment().then(assessmentData => {
-      if (assessmentData) {
+    // 2. Fetch assessment and student session simultaneously
+    const initialize = async () => {
+      try {
+        const [assessmentData, sessionRes] = await Promise.all([
+          fetchAssessment(),
+          fetch(`/api/assessments/student-session?studentId=${studentId}&code=${code}`).then(r => r.json())
+        ]);
+
+        if (!assessmentData) return;
         if (assessmentData.status !== "PUBLISHED") {
           setError("This assessment is closed.");
           setLoading(false);
           return;
         }
 
-        // Parse options and shuffle them
+        if (sessionRes.isCompleted) {
+          setError("You have already completed and submitted this assessment.");
+          setLoading(false);
+          return;
+        }
+
+        const student = sessionRes.student;
+        if (!student) {
+          setError("Student session not found. Please re-join using your details.");
+          setLoading(false);
+          return;
+        }
+
+        setSessionStatus(student.status);
+
+        // Parse question options
         let parsedQuestions = assessmentData.questions.map((q: any) => ({
           ...q,
           options: q.options ? shuffleArray(JSON.parse(q.options)) : []
         }));
-        
-        // Shuffle the order of the questions themselves
-        parsedQuestions = shuffleArray(parsedQuestions);
-        
+
+        // Preserve identical question sequence if student previously started
+        if (student.questionOrder && Array.isArray(student.questionOrder) && student.questionOrder.length > 0) {
+          const orderMap = new Map<string, number>();
+          student.questionOrder.forEach((qid: string, idx: number) => orderMap.set(qid, idx));
+          parsedQuestions.sort((a: any, b: any) => {
+            const idxA = orderMap.has(a.id) ? orderMap.get(a.id)! : 999;
+            const idxB = orderMap.has(b.id) ? orderMap.get(b.id)! : 999;
+            return idxA - idxB;
+          });
+        } else {
+          parsedQuestions = shuffleArray(parsedQuestions);
+        }
+
         setAssessment({ ...assessmentData, questions: parsedQuestions });
-        setTimeLeft(assessmentData.duration * 60);
+
+        // Restore saved draft answers if any
+        if (student.draftAnswers && Object.keys(student.draftAnswers).length > 0) {
+          setAnswers(student.draftAnswers);
+          setResumeAnswersCount(Object.keys(student.draftAnswers).length);
+          setIsResumedSession(true);
+        }
+
+        // Restore remaining time
+        if (typeof student.timeLeft === "number" && student.timeLeft > 0) {
+          setTimeLeft(student.timeLeft);
+        } else {
+          setTimeLeft(assessmentData.duration * 60);
+        }
+
+        // Restore violations count
+        if (typeof student.violations === "number") {
+          setViolations(student.violations);
+        }
+
+        setLoading(false);
+      } catch (err: any) {
+        setError(err.message || "Failed to initialize test session");
         setLoading(false);
       }
-    });
+    };
+
+    initialize();
   }, [code, router]);
+
+  // Polling for trainer resume approval when status is RESUME_REQUESTED
+  useEffect(() => {
+    if (sessionStatus !== "RESUME_REQUESTED") return;
+    const studentId = localStorage.getItem("currentStudentId");
+    if (!studentId) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/assessments/resume-action?studentId=${studentId}`);
+        const data = await res.json();
+        if (data.canResume) {
+          setSessionStatus("RESUME_APPROVED");
+          setIsResumedSession(true);
+        } else if (data.isRejected) {
+          setSessionStatus("RESUME_REJECTED");
+        }
+      } catch (e) {
+        console.error("Polling resume status failed:", e);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [sessionStatus]);
 
   const lastViolationTime = useRef(0);
 
@@ -205,9 +305,9 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
     return () => clearInterval(interval);
   }, [assessment, isSubmitted, answers, violations]);
 
-  // Timer logic
+  // Timer logic: only counts down when exam has actively started, student is in fullscreen/active, and not pending approval
   useEffect(() => {
-    if (!assessment || timeLeft <= 0 || isSubmitted) return;
+    if (!assessment || timeLeft <= 0 || isSubmitted || !hasStartedExam || sessionStatus === "RESUME_REQUESTED") return;
     
     const timer = setInterval(() => {
       setTimeLeft(prev => {
@@ -221,11 +321,62 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
     }, 1000);
     
     return () => clearInterval(timer);
-  }, [assessment, timeLeft, isSubmitted, answers, violations]);
+  }, [assessment, timeLeft, isSubmitted, hasStartedExam, sessionStatus]);
+
+  const saveSession = async (currentAnswers: any, currentTimeLeft: number, currentViolations: number, forceHasStarted?: boolean) => {
+    const studentId = localStorage.getItem("currentStudentId");
+    if (!studentId || !assessment || isSubmitting.current || isSubmitted) return;
+
+    try {
+      const questionOrder = assessment.questions.map((q: any) => q.id);
+      const res = await fetch("/api/assessments/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId,
+          assessmentId: assessment.id,
+          draftAnswers: currentAnswers,
+          questionOrder,
+          timeLeft: currentTimeLeft,
+          violations: currentViolations,
+          hasStarted: forceHasStarted ?? hasStartedExamRef.current
+        })
+      });
+      const data = await res.json();
+      if (data.status === "RESUME_REJECTED") {
+        setSessionStatus("RESUME_REJECTED");
+      }
+    } catch (e) {
+      console.error("Auto-save session error:", e);
+    }
+  };
+
+  // Periodic auto-save heartbeat every 12 seconds
+  useEffect(() => {
+    if (!assessment || isSubmitted || !hasStartedExam || sessionStatus === "RESUME_REQUESTED") return;
+
+    const interval = setInterval(() => {
+      saveSession(answersRef.current, timeLeftRef.current, violationsRef.current);
+    }, 12000);
+
+    return () => clearInterval(interval);
+  }, [assessment, isSubmitted, hasStartedExam, sessionStatus]);
+
+  // Debounced auto-save whenever answers change (within 1.5 seconds)
+  useEffect(() => {
+    if (!assessment || isSubmitted || !hasStartedExam) return;
+
+    const timeout = setTimeout(() => {
+      saveSession(answers, timeLeftRef.current, violationsRef.current);
+    }, 1500);
+
+    return () => clearTimeout(timeout);
+  }, [answers]);
 
   const requestFullscreen = () => {
     hasStartedExamRef.current = true;
     setHasStartedExam(true);
+    setSessionStatus("IN_PROGRESS");
     const el = document.documentElement as any;
     const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
     if (req) {
@@ -238,6 +389,8 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
     } else {
       setIsFullscreen(true);
     }
+    // Immediately persist start state to database
+    saveSession(answersRef.current, timeLeftRef.current, violationsRef.current, true);
   };
 
   const handleSubmitTest = async () => {
@@ -393,11 +546,86 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
     );
   }
 
+  if (sessionStatus === "RESUME_REJECTED") {
+    return (
+      <div className="flex h-screen items-center justify-center bg-rose-50 p-4">
+        <div className="bg-white p-8 md:p-10 rounded-2xl shadow-xl max-w-lg w-full text-center border-2 border-rose-300">
+          <div className="w-16 h-16 bg-rose-100 rounded-full flex items-center justify-center mx-auto mb-5 text-rose-600">
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </div>
+          <span className="text-xs font-bold uppercase tracking-wider bg-rose-100 text-rose-800 px-3 py-1 rounded-full">
+            Resume Declined
+          </span>
+          <h2 className="text-2xl font-black text-slate-900 mt-4 mb-2">Resume Not Allowed</h2>
+          <p className="text-slate-600 text-sm mb-6 leading-relaxed">
+            Your request to resume this exam session was declined by the trainer. You cannot continue this test.
+          </p>
+          <button
+            onClick={() => {
+              localStorage.removeItem("currentStudentId");
+              router.push("/");
+            }}
+            className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-sm transition shadow-md"
+          >
+            Return to Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (sessionStatus === "RESUME_REQUESTED") {
+    return (
+      <div className="flex h-screen items-center justify-center bg-amber-50/60 p-4">
+        <div className="bg-white p-8 md:p-10 rounded-2xl shadow-xl max-w-lg w-full text-center border-2 border-amber-300">
+          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-5 text-amber-600 animate-pulse">
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <span className="text-xs font-bold uppercase tracking-wider bg-amber-100 text-amber-800 px-3 py-1 rounded-full">
+            Session Interrupted
+          </span>
+          <h2 className="text-2xl font-black text-slate-900 mt-4 mb-2">Trainer Approval Required</h2>
+          <p className="text-slate-600 text-sm mb-6 leading-relaxed">
+            Your exam session was paused due to a power-off, battery down, or network disconnection. All your previous answers and remaining time are safely stored.
+          </p>
+
+          <div className="bg-amber-50 rounded-xl p-4 border border-amber-200 mb-6 text-left space-y-2 text-xs text-amber-950 font-medium">
+            <div className="flex justify-between">
+              <span className="text-amber-700">Student:</span>
+              <span className="font-bold">{studentName || "You"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-amber-700">Saved Answers:</span>
+              <span className="font-bold text-emerald-700">{resumeAnswersCount} questions answered</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-amber-700">Remaining Time:</span>
+              <span className="font-bold text-indigo-700">{Math.floor(timeLeft / 60)}m {timeLeft % 60}s</span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-center space-x-2 text-xs font-bold text-amber-800 bg-amber-100/70 py-2.5 px-4 rounded-lg mb-6">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
+            <span>Waiting for trainer to click &quot;Allow Resume&quot;...</span>
+          </div>
+
+          <p className="text-xs text-slate-400">
+            This screen will automatically resume into your exam as soon as your trainer approves. You do not need to refresh.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (!isFullscreen) {
     const hasStarted = hasStartedExam || hasStartedExamRef.current;
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50 p-4">
-        <div className={`bg-white p-8 rounded-xl shadow-lg max-w-lg text-center border-2 ${hasStarted ? 'border-red-500 shadow-red-100' : 'border-gray-200'}`}>
+        <div className={`bg-white p-8 rounded-xl shadow-lg max-w-lg text-center border-2 ${hasStarted ? 'border-red-500 shadow-red-100' : isResumedSession ? 'border-emerald-500 shadow-emerald-100' : 'border-gray-200'}`}>
           {hasStarted && (
             <div className="text-red-600 mb-4 flex justify-center">
               <svg className="w-16 h-16 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -405,14 +633,41 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
               </svg>
             </div>
           )}
+          {isResumedSession && !hasStarted && (
+            <div className="text-emerald-600 mb-4 flex justify-center">
+              <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center">
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            </div>
+          )}
           <h2 className="text-xl font-extrabold text-blue-600 mb-2">Besant Technologies Mock Exams</h2>
-          <h1 className="text-2xl font-bold mb-4">{hasStarted ? "Full-Screen Exited! (Malpractice Logged)" : assessment.title}</h1>
+          <h1 className="text-2xl font-bold mb-4">
+            {hasStarted 
+              ? "Full-Screen Exited! (Malpractice Logged)" 
+              : isResumedSession 
+                ? "Resume Approved by Trainer! ✅" 
+                : assessment.title}
+          </h1>
           <p className="text-gray-600 mb-6">
             {hasStarted 
               ? "You have exited full-screen mode. Leaving full-screen or switching windows is strictly prohibited and has been recorded as a malpractice violation. If you leave full-screen again, your test will be permanently submitted immediately." 
-              : "This assessment requires full-screen mode to ensure academic integrity. Once you enter full-screen, the timer will begin."}
+              : isResumedSession
+                ? `Your trainer has approved your test continuation. Your ${resumeAnswersCount} saved answers and remaining time have been restored. Click below to enter full-screen and resume your exam.`
+                : "This assessment requires full-screen mode to ensure academic integrity. Once you enter full-screen, the timer will begin."}
           </p>
-          {!hasStarted && (
+          {isResumedSession && !hasStarted && (
+            <div className="bg-emerald-50 text-emerald-800 p-4 rounded-xl mb-6 text-sm text-left border border-emerald-200">
+              <div className="font-bold mb-1">Restored Session Details:</div>
+              <ul className="list-disc pl-5 space-y-1 text-xs">
+                <li>Saved Answers: {resumeAnswersCount} questions preserved</li>
+                <li>Time Remaining: {Math.floor(timeLeft / 60)}m {timeLeft % 60}s</li>
+                <li>Recorded Malpractice Violations: {violations}</li>
+              </ul>
+            </div>
+          )}
+          {!hasStarted && !isResumedSession && (
             <div className="bg-blue-50 text-blue-800 p-4 rounded-md mb-6 text-sm text-left">
               <ul className="list-disc pl-5 space-y-2">
                 <li>Duration: {assessment.duration} minutes</li>
@@ -423,9 +678,19 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
           )}
           <button 
             onClick={requestFullscreen}
-            className={`font-bold py-3 px-8 rounded-lg w-full transition text-white ${hasStarted ? 'bg-red-600 hover:bg-red-700 shadow-lg' : 'bg-blue-600 hover:bg-blue-700 shadow-md'}`}
+            className={`font-bold py-3 px-8 rounded-lg w-full transition text-white ${
+              hasStarted 
+                ? 'bg-red-600 hover:bg-red-700 shadow-lg' 
+                : isResumedSession 
+                  ? 'bg-emerald-600 hover:bg-emerald-700 shadow-lg' 
+                  : 'bg-blue-600 hover:bg-blue-700 shadow-md'
+            }`}
           >
-            {hasStarted ? "I Understand, Return to Full-Screen" : "Enter Full-Screen & Start"}
+            {hasStarted 
+              ? "I Understand, Return to Full-Screen" 
+              : isResumedSession 
+                ? "Enter Full-Screen to Resume Test" 
+                : "Enter Full-Screen & Start"}
           </button>
         </div>
       </div>

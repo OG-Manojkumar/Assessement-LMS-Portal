@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 function JoinForm() {
@@ -16,6 +16,42 @@ function JoinForm() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Resume State if previous exam was interrupted (power off, network loss)
+  const [resumeInfo, setResumeInfo] = useState<{
+    studentId: string;
+    studentName: string;
+    joinCode: string;
+    savedCount: number;
+    timeLeft: number | null;
+  } | null>(null);
+  const [resumeStatus, setResumeStatus] = useState<"PENDING" | "APPROVED" | "REJECTED">("PENDING");
+
+  // Poll for Trainer's Resume Approval every 3 seconds
+  useEffect(() => {
+    if (!resumeInfo || resumeStatus !== "PENDING") return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/assessments/resume-action?studentId=${resumeInfo.studentId}`);
+        const data = await res.json();
+        if (data.canResume) {
+          setResumeStatus("APPROVED");
+          clearInterval(interval);
+          localStorage.setItem("currentStudentId", resumeInfo.studentId);
+          localStorage.setItem("currentStudentName", resumeInfo.studentName);
+          setTimeout(() => {
+            router.push(`/assessment/${resumeInfo.joinCode}`);
+          }, 800);
+        } else if (data.isRejected) {
+          setResumeStatus("REJECTED");
+          clearInterval(interval);
+        }
+      } catch (_) {}
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [resumeInfo, resumeStatus, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,6 +76,20 @@ function JoinForm() {
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to join assessment");
+      }
+
+      // If student was interrupted, require trainer permission to resume
+      if (data.resumePending) {
+        setResumeInfo({
+          studentId: data.student.id,
+          studentName: data.student.name,
+          joinCode: formData.joinCode.toUpperCase(),
+          savedCount: data.savedAnswersCount || 0,
+          timeLeft: data.timeLeft
+        });
+        setResumeStatus("PENDING");
+        setIsLoading(false);
+        return;
       }
 
       // Store student ID in session/localStorage for the assessment page
@@ -77,7 +127,129 @@ function JoinForm() {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-4 shadow sm:rounded-lg sm:px-10 border">
-          <form className="space-y-6" onSubmit={handleSubmit}>
+          {resumeInfo ? (
+            <div className="text-center">
+              <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+              </div>
+              <span className="text-xs font-bold text-amber-700 bg-amber-100 px-3 py-1 rounded-full uppercase tracking-wider">
+                Session Interrupted
+              </span>
+              <h2 className="text-2xl font-bold text-gray-900 mt-3 mb-2">
+                Trainer Approval Required
+              </h2>
+              <p className="text-sm text-gray-600 mb-6">
+                Your previous test session was interrupted (power loss, network failure, or device restart).
+              </p>
+
+              <div className="bg-slate-50 border rounded-xl p-4 mb-6 text-left text-sm space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Student:</span>
+                  <span className="font-bold text-gray-900">{resumeInfo.studentName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Assessment:</span>
+                  <span className="font-mono font-bold text-blue-600">{resumeInfo.joinCode}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Saved Answers:</span>
+                  <span className="font-bold text-green-600">{resumeInfo.savedCount} Question(s) Preserved</span>
+                </div>
+                {resumeInfo.timeLeft && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Time Left:</span>
+                    <span className="font-bold text-gray-900">{Math.floor(resumeInfo.timeLeft / 60)} min {resumeInfo.timeLeft % 60}s</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+                  <span className="text-gray-500">Status:</span>
+                  {resumeStatus === "PENDING" && (
+                    <span className="text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded flex items-center space-x-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                      <span>Waiting for Trainer...</span>
+                    </span>
+                  )}
+                  {resumeStatus === "APPROVED" && (
+                    <span className="text-xs font-bold text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded">
+                      ✅ Approved! Resuming...
+                    </span>
+                  )}
+                  {resumeStatus === "REJECTED" && (
+                    <span className="text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded">
+                      ❌ Resume Declined
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {resumeStatus === "PENDING" && (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500 italic">
+                    Please ask your trainer to click <strong>&quot;Allow Resume&quot;</strong> on their dashboard. This screen will automatically resume once approved.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(`/api/assessments/resume-action?studentId=${resumeInfo.studentId}`);
+                        const data = await res.json();
+                        if (data.canResume) {
+                          setResumeStatus("APPROVED");
+                          localStorage.setItem("currentStudentId", resumeInfo.studentId);
+                          localStorage.setItem("currentStudentName", resumeInfo.studentName);
+                          router.push(`/assessment/${resumeInfo.joinCode}`);
+                        } else if (data.isRejected) {
+                          setResumeStatus("REJECTED");
+                        } else {
+                          alert("Still waiting for trainer's approval. Please notify your trainer.");
+                        }
+                      } catch (e: any) {
+                        alert("Error checking status: " + e.message);
+                      }
+                    }}
+                    className="w-full bg-blue-600 text-white font-bold py-2.5 rounded-lg text-sm hover:bg-blue-700 transition shadow"
+                  >
+                    Check Approval Status
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResumeInfo(null);
+                      setResumeStatus("PENDING");
+                    }}
+                    className="w-full text-xs text-gray-500 hover:text-gray-700 font-medium py-1"
+                  >
+                    Cancel & Return to Join Form
+                  </button>
+                </div>
+              )}
+
+              {resumeStatus === "APPROVED" && (
+                <div className="p-4 bg-green-50 border border-green-200 rounded-xl text-green-800 text-sm font-bold animate-pulse">
+                  ✅ Trainer approved your resume request! Redirecting you into your exam now...
+                </div>
+              )}
+
+              {resumeStatus === "REJECTED" && (
+                <div className="space-y-4">
+                  <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+                    <strong>Resume Request Declined:</strong> Your trainer did not allow this exam session to be resumed.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResumeInfo(null);
+                      setResumeStatus("PENDING");
+                    }}
+                    className="w-full bg-gray-200 text-gray-800 font-bold py-2.5 rounded-lg text-sm hover:bg-gray-300 transition"
+                  >
+                    Back to Join Form
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <form className="space-y-6" onSubmit={handleSubmit}>
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
                 {error}
@@ -162,6 +334,7 @@ function JoinForm() {
               </button>
             </div>
           </form>
+          )}
         </div>
       </div>
     </div>

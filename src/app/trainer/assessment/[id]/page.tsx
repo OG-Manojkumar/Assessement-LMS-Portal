@@ -43,9 +43,33 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
     }
   };
 
+  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+
   useEffect(() => {
     fetchAssessment();
+    const interval = setInterval(fetchAssessment, 5000);
+    return () => clearInterval(interval);
   }, [id]);
+
+  const handleResumeAction = async (studentId: string, action: "APPROVE" | "REJECT" | "RESET") => {
+    setActionLoading(prev => ({ ...prev, [studentId]: true }));
+    try {
+      const res = await fetch("/api/assessments/resume-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId, action })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        await fetchAssessment();
+      } else {
+        alert("Action failed: " + (data.error || "Unknown error"));
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    }
+    setActionLoading(prev => ({ ...prev, [studentId]: false }));
+  };
 
   const handleUpdate = async () => {
     setIsSaving(true);
@@ -213,6 +237,42 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
     document.body.removeChild(link);
   };
 
+  const pendingResumeRequests = (assessment.students || []).filter(
+    (s: any) => s.status === "RESUME_REQUESTED"
+  );
+
+  const activeStudents = (assessment.students || []).filter(
+    (s: any) => (!s.results || s.results.length === 0) && s.status !== "COMPLETED"
+  );
+
+  const getDraftCount = (draftAnswersJson: string | null) => {
+    if (!draftAnswersJson) return 0;
+    try {
+      const obj = JSON.parse(draftAnswersJson);
+      return Object.keys(obj).length;
+    } catch {
+      return 0;
+    }
+  };
+
+  const formatTimeRemaining = (seconds: number | null) => {
+    if (seconds === null || seconds === undefined) return `${assessment.duration}m (full)`;
+    if (seconds <= 0) return "0s";
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
+  };
+
+  const formatLastActive = (dateStr: string | null) => {
+    if (!dateStr) return "Not active yet";
+    const diffMs = Date.now() - new Date(dateStr).getTime();
+    const diffSecs = Math.floor(diffMs / 1000);
+    if (diffSecs < 30) return "🟢 Active now";
+    if (diffSecs < 120) return "🟡 1m ago";
+    if (diffSecs < 3600) return `🟡 ${Math.floor(diffSecs / 60)}m ago`;
+    return `🔴 Offline (${Math.floor(diffSecs / 3600)}h ago)`;
+  };
+
   return (
     <div className="p-8 max-w-7xl mx-auto">
       <header className="mb-8 flex items-center justify-between">
@@ -270,6 +330,232 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
           </button>
         </div>
       </header>
+
+      {/* Urgent Alert Banner: Students Requesting Resume */}
+      {pendingResumeRequests.length > 0 && (
+        <div className="mb-8 p-5 bg-amber-50 border-2 border-amber-400 rounded-2xl shadow-sm animate-pulse-subtle">
+          <div className="flex items-start justify-between">
+            <div className="flex items-start space-x-3">
+              <span className="text-3xl">⚠️</span>
+              <div>
+                <h3 className="text-amber-950 font-black text-lg">
+                  {pendingResumeRequests.length} Student{pendingResumeRequests.length > 1 ? "s" : ""} Waiting for Test Resumption Approval
+                </h3>
+                <p className="text-amber-800 text-sm mt-1 max-w-3xl">
+                  A power-off, battery cut, or network disconnection occurred during their exam. Their answers and remaining time are safely preserved in the database. 
+                  <span className="font-bold underline ml-1">The student cannot continue unless you click &quot;Allow Resume&quot; below.</span>
+                </p>
+              </div>
+            </div>
+            <span className="text-xs font-bold uppercase tracking-wider bg-amber-200 text-amber-900 px-3 py-1 rounded-full">
+              Action Required
+            </span>
+          </div>
+
+          <div className="mt-4 space-y-2.5">
+            {pendingResumeRequests.map((s: any) => (
+              <div key={s.id} className="flex flex-col sm:flex-row sm:items-center justify-between bg-white p-4 rounded-xl border border-amber-200 shadow-sm gap-3">
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="font-extrabold text-slate-900 text-base">{s.name}</span>
+                    <span className="text-slate-500 text-sm font-medium">({s.email} • {s.mobile})</span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-600 font-medium">
+                    <span className="bg-slate-100 px-2.5 py-1 rounded-md text-slate-700">
+                      📝 {getDraftCount(s.draftAnswers)} / {assessment.questions.length} Answers Saved
+                    </span>
+                    <span className="bg-slate-100 px-2.5 py-1 rounded-md text-slate-700">
+                      ⏱️ {formatTimeRemaining(s.timeLeft)} remaining
+                    </span>
+                    <span className="bg-slate-100 px-2.5 py-1 rounded-md text-slate-700">
+                      🚨 {s.violations || 0} Malpractice Violations
+                    </span>
+                    {s.resumeRequestedAt && (
+                      <span className="text-amber-700">
+                        Requested: {new Date(s.resumeRequestedAt).toLocaleTimeString()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2 shrink-0">
+                  <button
+                    onClick={() => handleResumeAction(s.id, "APPROVE")}
+                    disabled={actionLoading[s.id]}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center disabled:opacity-50"
+                  >
+                    {actionLoading[s.id] ? "Updating..." : "✅ Allow Resume"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirm(`Are you sure you want to REJECT ${s.name}'s request to resume? They will be blocked from continuing.`)) {
+                        handleResumeAction(s.id, "REJECT");
+                      }
+                    }}
+                    disabled={actionLoading[s.id]}
+                    className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center disabled:opacity-50"
+                  >
+                    {actionLoading[s.id] ? "Updating..." : "❌ Reject"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Active Sessions & Resume Control Table */}
+      {activeStudents.length > 0 && (
+        <div className="mb-8 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h2 className="text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
+                <span>Active Exam Sessions & Resume Control</span>
+                <span className="bg-indigo-100 text-indigo-800 text-xs px-2.5 py-0.5 rounded-full font-bold">
+                  {activeStudents.length} Active
+                </span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Students currently taking the test, waiting to start, or paused due to power/network interruptions.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+              Auto-updating live
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Student</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Session Status</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Saved Drafts</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Time Left</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Violations</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Activity</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {activeStudents.map((s: any) => {
+                  const draftCount = getDraftCount(s.draftAnswers);
+                  return (
+                    <tr key={s.id} className="hover:bg-slate-50 transition">
+                      <td className="px-4 py-3">
+                        <div className="font-bold text-slate-900">{s.name}</div>
+                        <div className="text-xs text-slate-500">{s.email} • {s.mobile}</div>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {s.status === "RESUME_REQUESTED" && (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                            ⚠️ Resume Requested
+                          </span>
+                        )}
+                        {s.status === "RESUME_APPROVED" && (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                            ✅ Allowed to Resume
+                          </span>
+                        )}
+                        {s.status === "RESUME_REJECTED" && (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                            ⛔ Resume Declined
+                          </span>
+                        )}
+                        {s.status === "IN_PROGRESS" && (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            🟢 In Exam
+                          </span>
+                        )}
+                        {(s.status === "NOT_STARTED" || !s.status) && (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700">
+                            ⚪ Waiting to Start
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 font-medium text-slate-700">
+                        {draftCount > 0 ? (
+                          <span className="font-bold text-indigo-600">{draftCount} / {assessment.questions.length} saved</span>
+                        ) : (
+                          <span className="text-slate-400">0 saved</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700 font-medium whitespace-nowrap">
+                        {formatTimeRemaining(s.timeLeft)}
+                      </td>
+                      <td className="px-4 py-3">
+                        {s.violations > 0 ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-rose-100 text-rose-800">
+                            {s.violations} Tab Switches
+                          </span>
+                        ) : (
+                          <span className="text-emerald-700 text-xs font-bold">0 Clean</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs font-medium text-slate-600 whitespace-nowrap">
+                        {formatLastActive(s.lastHeartbeat)}
+                      </td>
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end space-x-2">
+                          {s.status === "RESUME_REQUESTED" && (
+                            <>
+                              <button
+                                onClick={() => handleResumeAction(s.id, "APPROVE")}
+                                disabled={actionLoading[s.id]}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded shadow-sm transition disabled:opacity-50"
+                              >
+                                Allow
+                              </button>
+                              <button
+                                onClick={() => handleResumeAction(s.id, "REJECT")}
+                                disabled={actionLoading[s.id]}
+                                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded shadow-sm transition disabled:opacity-50"
+                              >
+                                Reject
+                              </button>
+                            </>
+                          )}
+                          {s.status === "RESUME_REJECTED" && (
+                            <button
+                              onClick={() => handleResumeAction(s.id, "APPROVE")}
+                              disabled={actionLoading[s.id]}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded shadow-sm transition disabled:opacity-50"
+                            >
+                              Allow Resume
+                            </button>
+                          )}
+                          {s.status === "RESUME_APPROVED" && (
+                            <button
+                              onClick={() => handleResumeAction(s.id, "REJECT")}
+                              disabled={actionLoading[s.id]}
+                              className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded shadow-sm transition disabled:opacity-50"
+                            >
+                              Revoke
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              if (confirm(`Reset session for ${s.name}? This will clear all draft answers and start their exam afresh.`)) {
+                                handleResumeAction(s.id, "RESET");
+                              }
+                            }}
+                            disabled={actionLoading[s.id]}
+                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded border border-slate-300 transition disabled:opacity-50"
+                            title="Reset student session"
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="mb-4 flex justify-between items-center bg-white p-4 rounded-xl border shadow-sm">
         <h2 className="text-lg font-bold text-gray-900">Student Results ({filteredAndSortedResults.length})</h2>

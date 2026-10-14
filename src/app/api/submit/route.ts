@@ -201,6 +201,11 @@ Respond STRICTLY in valid JSON format as an object mapping each "questionId" to 
       }
     });
 
+    await prisma.student.update({
+      where: { id: studentId },
+      data: { status: "COMPLETED" }
+    });
+
     return NextResponse.json({ success: true, score: totalScore, result });
   } catch (error: any) {
     console.error("Submission error:", error);

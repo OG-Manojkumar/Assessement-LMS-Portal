@@ -14,6 +14,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         results: {
           include: { student: true },
           orderBy: { score: "desc" }
+        },
+        students: {
+          include: { results: true },
+          orderBy: { joinedAt: "desc" }
         }
       }
     });
