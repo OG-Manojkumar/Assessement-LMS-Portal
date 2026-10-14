@@ -600,33 +600,23 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
                           <button
                             type="button"
                             onClick={() => setExpandedSchema(prev => ({ ...prev, [q.id]: !prev[q.id] }))}
-                            className="text-[11px] font-bold bg-gray-800 text-gray-300 border border-gray-700 px-2 py-0.5 rounded hover:bg-gray-700 transition"
+                            className="text-[11px] font-bold bg-gray-800 text-gray-300 border border-gray-700 px-2.5 py-1 rounded hover:bg-gray-700 transition"
                             title="Expand or compact image container"
                           >
                             {expandedSchema[q.id] ? "↕ Compact Height" : "↕ Expand Height"}
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => setPreviewImage(q.imageUrl)}
-                            className="text-[11px] font-bold bg-blue-600/20 text-blue-300 border border-blue-500/30 px-2.5 py-0.5 rounded hover:bg-blue-600/40 transition flex items-center space-x-1"
-                            title="Zoom in without leaving full-screen"
-                          >
-                            <span>🔍 Zoom In</span>
-                          </button>
                         </div>
                       </div>
                       <div 
-                        className={`bg-black/60 rounded-lg p-2 border border-gray-800 overflow-auto flex justify-center cursor-pointer group transition-all duration-200 ${expandedSchema[q.id] ? 'max-h-[500px]' : 'max-h-60'}`}
-                        onClick={() => setPreviewImage(q.imageUrl)}
-                        title="Click to zoom in"
+                        className={`bg-black/60 rounded-lg p-2 border border-gray-800 overflow-auto flex justify-center transition-all duration-200 ${expandedSchema[q.id] ? 'max-h-[520px]' : 'max-h-60'}`}
                       >
                         <img
                           src={q.imageUrl}
                           alt="SQL Table Reference"
-                          className={`${expandedSchema[q.id] ? 'max-h-[480px]' : 'max-h-56'} w-auto object-contain rounded group-hover:scale-[1.01] transition-all`}
+                          className={`${expandedSchema[q.id] ? 'max-h-[500px]' : 'max-h-56'} w-auto object-contain rounded transition-all`}
                         />
                       </div>
-                      <p className="text-center text-[10px] text-gray-500 mt-1 italic">Click image or &quot;Zoom In&quot; to inspect full resolution. Use &quot;Expand Height&quot; to view inline.</p>
+                      <p className="text-center text-[10px] text-gray-500 mt-1 italic">Use &quot;Expand Height&quot; to view table schema in full size inline.</p>
                     </div>
                   )}
 
