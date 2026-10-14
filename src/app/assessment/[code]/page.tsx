@@ -30,6 +30,9 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
   const [isRunning, setIsRunning] = useState<Record<string, boolean>>({});
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showSchemaInEditor, setShowSchemaInEditor] = useState<Record<string, boolean>>({});
+  const [expandedSchema, setExpandedSchema] = useState<Record<string, boolean>>({});
+  const [hasStartedExam, setHasStartedExam] = useState(false);
+  const hasStartedExamRef = useRef(false);
 
   const fetchAssessment = async () => {
     try {
@@ -90,11 +93,12 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
 
   const lastViolationTime = useRef(0);
 
-  // Tab switch (malpractice) tracking
+  // Tab switch & fullscreen exit (malpractice) tracking
   useEffect(() => {
-    if (!assessment || isSubmitted || !isFullscreen) return;
+    if (!assessment || isSubmitted) return;
 
     const incrementViolation = () => {
+      if (!hasStartedExamRef.current || isSubmitting.current) return;
       const now = Date.now();
       // Only count one violation every 2 seconds to prevent blur and visibilitychange firing together and double-counting
       if (now - lastViolationTime.current > 2000) {
@@ -117,14 +121,34 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
 
     const handleFullscreenChange = () => {
       const doc = document as any;
-      if (!doc.fullscreenElement && !doc.webkitFullscreenElement && !doc.mozFullScreenElement && !doc.msFullscreenElement) {
+      const isStillFullscreen = !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement);
+      if (!isStillFullscreen) {
         setIsFullscreen(false);
+        setPreviewImage(null); // Close any open image modal immediately
+        // If the student has already started the test, exiting fullscreen is a STRICT MALPRACTICE VIOLATION!
+        if (hasStartedExamRef.current && !isSubmitting.current) {
+          incrementViolation();
+        }
+      } else {
+        setIsFullscreen(true);
+        try {
+          if ((navigator as any).keyboard && (navigator as any).keyboard.lock) {
+            (navigator as any).keyboard.lock(["Escape"]);
+          }
+        } catch (_) {}
       }
     };
 
     const handleContextMenu = (e: Event) => e.preventDefault();
     const handleCopyPaste = (e: Event) => e.preventDefault();
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (previewImage) {
+          e.preventDefault();
+          e.stopPropagation();
+          setPreviewImage(null);
+        }
+      }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'v' || e.key === 'x')) {
         e.preventDefault();
       }
@@ -156,7 +180,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
       document.removeEventListener("paste", handleCopyPaste);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [assessment, isSubmitted, isFullscreen]);
+  }, [assessment, isSubmitted]);
 
   // Auto-submit on 2nd violation
   useEffect(() => {
@@ -200,17 +224,24 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
   }, [assessment, timeLeft, isSubmitted, answers, violations]);
 
   const requestFullscreen = () => {
+    hasStartedExamRef.current = true;
+    setHasStartedExam(true);
     const el = document.documentElement as any;
-    if (el.requestFullscreen) {
-      el.requestFullscreen().then(() => setIsFullscreen(true)).catch(console.error);
-    } else if (el.webkitRequestFullscreen) {
-      el.webkitRequestFullscreen();
-      setIsFullscreen(true);
-    } else if (el.msRequestFullscreen) {
-      el.msRequestFullscreen();
-      setIsFullscreen(true);
+    const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+    if (req) {
+      req.call(el).then(() => {
+        setIsFullscreen(true);
+        try {
+          if ((navigator as any).keyboard && (navigator as any).keyboard.lock) {
+            (navigator as any).keyboard.lock(["Escape"]);
+          }
+        } catch (_) {}
+      }).catch((err: any) => {
+        console.error("Fullscreen request failed:", err);
+        setIsFullscreen(true);
+      });
     } else {
-      setIsFullscreen(true); // fallback
+      setIsFullscreen(true);
     }
   };
 
@@ -368,15 +399,22 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
   }
 
   if (!isFullscreen) {
-    const hasStarted = Object.keys(answers).length > 0;
+    const hasStarted = hasStartedExam || hasStartedExamRef.current;
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50 p-4">
-        <div className="bg-white p-8 rounded-xl shadow-lg max-w-lg text-center">
+        <div className={`bg-white p-8 rounded-xl shadow-lg max-w-lg text-center border-2 ${hasStarted ? 'border-red-500 shadow-red-100' : 'border-gray-200'}`}>
+          {hasStarted && (
+            <div className="text-red-600 mb-4 flex justify-center">
+              <svg className="w-16 h-16 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+          )}
           <h2 className="text-xl font-extrabold text-blue-600 mb-2">Besant Technologies Mock Exams</h2>
-          <h1 className="text-2xl font-bold mb-4">{assessment.title}</h1>
+          <h1 className="text-2xl font-bold mb-4">{hasStarted ? "Full-Screen Exited! (Malpractice Logged)" : assessment.title}</h1>
           <p className="text-gray-600 mb-6">
             {hasStarted 
-              ? "You have exited full-screen mode. You must return to full-screen to continue your test." 
+              ? "You have exited full-screen mode. Leaving full-screen or switching windows is strictly prohibited and has been recorded as a malpractice violation. If you leave full-screen again, your test will be permanently submitted immediately." 
               : "This assessment requires full-screen mode to ensure academic integrity. Once you enter full-screen, the timer will begin."}
           </p>
           {!hasStarted && (
@@ -390,9 +428,9 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
           )}
           <button 
             onClick={requestFullscreen}
-            className="bg-blue-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-blue-700 w-full"
+            className={`font-bold py-3 px-8 rounded-lg w-full transition text-white ${hasStarted ? 'bg-red-600 hover:bg-red-700 shadow-lg' : 'bg-blue-600 hover:bg-blue-700 shadow-md'}`}
           >
-            {hasStarted ? "Resume Full-Screen" : "Enter Full-Screen & Start"}
+            {hasStarted ? "I Understand, Return to Full-Screen" : "Enter Full-Screen & Start"}
           </button>
         </div>
       </div>
@@ -558,26 +596,37 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
                           <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                           <span>Table Schema & Sample Data Reference</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setPreviewImage(q.imageUrl)}
-                          className="text-[11px] font-bold bg-blue-600/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded hover:bg-blue-600/40 transition flex items-center space-x-1"
-                        >
-                          <span>🔍 Enlarge Fullscreen</span>
-                        </button>
+                        <div className="flex items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedSchema(prev => ({ ...prev, [q.id]: !prev[q.id] }))}
+                            className="text-[11px] font-bold bg-gray-800 text-gray-300 border border-gray-700 px-2 py-0.5 rounded hover:bg-gray-700 transition"
+                            title="Expand or compact image container"
+                          >
+                            {expandedSchema[q.id] ? "↕ Compact Height" : "↕ Expand Height"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewImage(q.imageUrl)}
+                            className="text-[11px] font-bold bg-blue-600/20 text-blue-300 border border-blue-500/30 px-2.5 py-0.5 rounded hover:bg-blue-600/40 transition flex items-center space-x-1"
+                            title="Zoom in without leaving full-screen"
+                          >
+                            <span>🔍 Zoom In</span>
+                          </button>
+                        </div>
                       </div>
                       <div 
-                        className="bg-black/60 rounded-lg p-2 border border-gray-800 max-h-60 overflow-auto flex justify-center cursor-pointer group"
+                        className={`bg-black/60 rounded-lg p-2 border border-gray-800 overflow-auto flex justify-center cursor-pointer group transition-all duration-200 ${expandedSchema[q.id] ? 'max-h-[500px]' : 'max-h-60'}`}
                         onClick={() => setPreviewImage(q.imageUrl)}
-                        title="Click to zoom in full size"
+                        title="Click to zoom in"
                       >
                         <img
                           src={q.imageUrl}
                           alt="SQL Table Reference"
-                          className="max-h-56 w-auto object-contain rounded group-hover:scale-[1.01] transition-transform"
+                          className={`${expandedSchema[q.id] ? 'max-h-[480px]' : 'max-h-56'} w-auto object-contain rounded group-hover:scale-[1.01] transition-all`}
                         />
                       </div>
-                      <p className="text-center text-[10px] text-gray-500 mt-1 italic">Click image to enlarge without leaving exam</p>
+                      <p className="text-center text-[10px] text-gray-500 mt-1 italic">Click image or &quot;Zoom In&quot; to inspect full resolution. Use &quot;Expand Height&quot; to view inline.</p>
                     </div>
                   )}
 
@@ -690,31 +739,47 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
       {/* Safe In-Page Lightbox for Table Schema (No tab switch / malpractice) */}
       {previewImage && (
         <div 
-          className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 cursor-pointer"
           onClick={() => setPreviewImage(null)}
         >
           <div 
-            className="relative max-w-5xl w-full max-h-[92vh] bg-white rounded-2xl p-4 shadow-2xl overflow-auto flex flex-col"
+            className="relative max-w-5xl w-full max-h-[92vh] bg-white rounded-2xl p-5 shadow-2xl overflow-auto flex flex-col cursor-default"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex justify-between items-center mb-3 pb-2 border-b border-gray-100">
+            <div className="flex justify-between items-center mb-2 pb-3 border-b border-gray-100">
               <div className="flex items-center space-x-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
                 <span className="font-bold text-gray-900 text-sm">Reference SQL Table / Dataset</span>
               </div>
               <button 
                 onClick={() => setPreviewImage(null)}
-                className="text-xs font-bold text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition"
+                className="text-xs font-bold text-white bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition shadow flex items-center space-x-1.5"
               >
-                ✕ Close Preview
+                <span>✕ Close Preview</span>
               </button>
             </div>
-            <div className="flex justify-center items-center overflow-auto flex-1 p-2">
+
+            {/* Anti-Cheat Notice Banner */}
+            <div className="bg-amber-50 border border-amber-200 text-amber-900 text-xs px-3.5 py-2 rounded-lg mb-3 flex items-center space-x-2">
+              <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+              <span>Click the red <strong>&quot;✕ Close Preview&quot;</strong> button or click outside this box to return to the editor. <strong>Do NOT press the Escape key</strong> (exiting full-screen is recorded as an exam violation).</span>
+            </div>
+
+            <div className="flex justify-center items-center overflow-auto flex-1 p-2 bg-gray-50 rounded-xl border border-gray-100">
               <img 
                 src={previewImage} 
                 alt="Enlarged Reference Table" 
-                className="max-h-[78vh] w-auto object-contain rounded-lg shadow-sm border border-gray-100"
+                className="max-h-[70vh] w-auto object-contain rounded-lg shadow-sm"
               />
+            </div>
+
+            <div className="mt-3 pt-2 border-t border-gray-100 flex justify-end">
+              <button 
+                onClick={() => setPreviewImage(null)}
+                className="text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg transition"
+              >
+                Done / Back to Questions
+              </button>
             </div>
           </div>
         </div>
