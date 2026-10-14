@@ -454,13 +454,13 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
                 </span>
               </div>
 
-              {/* Reference Table / Schema Picture */}
-              {q.imageUrl && (
+              {/* Optional Reference Diagram for MCQ questions only (Coding/SQL questions reflect table inside query editor) */}
+              {q.type === 'MCQ' && q.imageUrl && (
                 <div className="mb-6 bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center">
                       <svg className="w-4 h-4 mr-1.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                      Reference Table / Schema Picture
+                      Reference Diagram
                     </span>
                     <button
                       type="button"
@@ -477,11 +477,10 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
                   >
                     <img
                       src={q.imageUrl}
-                      alt="Question table reference"
+                      alt="Question reference"
                       className="max-h-80 w-auto object-contain rounded group-hover:scale-[1.01] transition-transform"
                     />
                   </div>
-                  <p className="text-center text-[11px] text-gray-400 mt-1.5 italic">Click the table picture above to enlarge</p>
                 </div>
               )}
 
