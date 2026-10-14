@@ -102,16 +102,24 @@ If it is valid, output ONLY what this code outputs to the console/terminal when 
 Do not provide greetings, conversational filler, or explanations.
 `;
 
-    const models = ["gemini-3.5-flash", "gemini-3.6-flash"];
+    const models = [
+      "gemini-3.1-flash-lite-preview",
+      "gemini-3-flash-preview",
+      "gemini-3.5-flash",
+      "gemini-3.6-flash"
+    ];
     for (const modelName of models) {
       try {
         const model = genAI.getGenerativeModel({ model: modelName });
         const generatePromise = model.generateContent(prompt).then((r) => r.response.text());
         const timeoutPromise = new Promise<string>((_, reject) =>
-          setTimeout(() => reject(new Error("AI timeout")), 5000)
+          setTimeout(() => reject(new Error("AI timeout")), 7000)
         );
         const aiOutput = await Promise.race([generatePromise, timeoutPromise]);
-        return NextResponse.json({ output: aiOutput.trim() });
+        let cleanOutput = aiOutput.trim();
+        // Remove markdown backticks if present
+        cleanOutput = cleanOutput.replace(/^```[a-zA-Z0-9_-]*\r?\n/, "").replace(/\r?\n```$/, "").trim();
+        return NextResponse.json({ output: cleanOutput });
       } catch (err: any) {
         console.warn(`Run code failed on ${modelName}:`, err?.message || err);
       }

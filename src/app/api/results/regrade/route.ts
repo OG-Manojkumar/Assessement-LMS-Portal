@@ -6,7 +6,12 @@ const prisma = new PrismaClient();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 async function generateWithRetry(prompt: string) {
-  const models = ["gemini-3.5-flash", "gemini-3.6-flash"];
+  const models = [
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3-flash-preview",
+    "gemini-3.5-flash",
+    "gemini-3.6-flash"
+  ];
   for (let attempt = 0; attempt < 4; attempt++) {
     const modelName = models[attempt % models.length];
     try {

@@ -38,9 +38,14 @@ export async function POST(req: NextRequest) {
     let totalScore = 0;
     const detailedResults: any = { meta: { violations } };
 
-    // Helper function to call Gemini with working models and strict 5-second timeout
+    // Helper function to call Gemini with working models and strict 6-second timeout
     const generateWithTimeout = async (prompt: string, timeoutMs = 6000) => {
-      const models = ["gemini-3.5-flash", "gemini-3.6-flash"];
+      const models = [
+        "gemini-3.1-flash-lite-preview",
+        "gemini-3-flash-preview",
+        "gemini-3.5-flash",
+        "gemini-3.6-flash"
+      ];
       for (const modelName of models) {
         try {
           const model = genAI.getGenerativeModel({ model: modelName });
