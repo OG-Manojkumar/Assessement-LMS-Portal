@@ -43,7 +43,8 @@ export async function POST(req: NextRequest) {
             options: q.options ? JSON.stringify(q.options) : null,
             correctAnswer: q.correctAnswer,
             marks: q.marks || 1,
-            language: q.language || null
+            language: q.language || null,
+            imageUrl: q.imageUrl || null
           }))
         }
       }

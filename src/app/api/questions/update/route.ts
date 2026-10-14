@@ -5,7 +5,7 @@ const prisma = new PrismaClient();
 
 export async function PUT(req: NextRequest) {
   try {
-    const { id, text, correctAnswer, marks } = await req.json();
+    const { id, text, correctAnswer, marks, imageUrl, language } = await req.json();
 
     if (!id) {
       return NextResponse.json({ error: "Missing question ID" }, { status: 400 });
@@ -16,7 +16,9 @@ export async function PUT(req: NextRequest) {
       data: { 
         text, 
         correctAnswer, 
-        marks: parseInt(marks) || 1 
+        marks: parseInt(marks) || 1,
+        ...(imageUrl !== undefined ? { imageUrl } : {}),
+        ...(language !== undefined ? { language } : {})
       }
     });
 

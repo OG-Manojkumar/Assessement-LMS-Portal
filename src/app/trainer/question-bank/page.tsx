@@ -23,7 +23,7 @@ export default function QuestionBank() {
   const [newQLanguage, setNewQLanguage] = useState("Python");
   const [newQCorrect, setNewQCorrect] = useState("");
   const [newQOptions, setNewQOptions] = useState(""); // comma separated
-
+  const [newQImage, setNewQImage] = useState<string | null>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -65,7 +65,8 @@ export default function QuestionBank() {
       marks: parseInt(newQMarks),
       correctAnswer: newQCorrect,
       language: newQType === "CODING" ? newQLanguage : null,
-      options: newQType === "MCQ" ? newQOptions.split(",").map(s => s.trim()).filter(Boolean) : []
+      options: newQType === "MCQ" ? newQOptions.split(",").map(s => s.trim()).filter(Boolean) : [],
+      imageUrl: newQImage
     };
 
     if (editIndex !== null) {
@@ -81,6 +82,7 @@ export default function QuestionBank() {
     setNewQText("");
     setNewQCorrect("");
     setNewQOptions("");
+    setNewQImage(null);
   };
 
   const openEditModal = (idx: number) => {
@@ -92,6 +94,7 @@ export default function QuestionBank() {
     setNewQCorrect(q.correctAnswer);
     setNewQLanguage(q.language || "Python");
     setNewQOptions(q.options ? q.options.join(", ") : "");
+    setNewQImage(q.imageUrl || null);
     setShowAddModal(true);
   };
 
@@ -177,6 +180,7 @@ export default function QuestionBank() {
                 setNewQText("");
                 setNewQCorrect("");
                 setNewQOptions("");
+                setNewQImage(null);
                 setShowAddModal(true);
               }}
               className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-50 transition-colors"
@@ -220,6 +224,12 @@ export default function QuestionBank() {
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900">
                       <div className="font-medium mb-1 whitespace-pre-wrap">{q.text}</div>
+                      {q.imageUrl && (
+                        <div className="my-2 flex items-center space-x-2 bg-blue-50 border border-blue-200 p-1.5 rounded-lg w-fit">
+                          <img src={q.imageUrl} alt="Table diagram" className="h-10 w-auto rounded border bg-white object-contain" />
+                          <span className="text-xs font-bold text-blue-700 pr-1">📷 Table / Diagram Attached</span>
+                        </div>
+                      )}
                       {q.options && q.options.length > 0 && (
                         <ul className="list-disc pl-5 text-gray-500 space-y-1">
                           {q.options.map((opt: string, i: number) => (
@@ -354,10 +364,51 @@ export default function QuestionBank() {
                   >
                     <option value="Python">Python</option>
                     <option value="Java">Java</option>
+                    <option value="SQL">SQL</option>
                     <option value="MySQL">MySQL</option>
+                    <option value="JavaScript">JavaScript</option>
+                    <option value="C++">C++</option>
                   </select>
                 </div>
               )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-800 mb-1">
+                  Reference Table / Schema Picture (Optional for SQL / Questions)
+                </label>
+                <div className="border border-dashed border-gray-300 rounded-lg p-3 bg-gray-50 flex flex-col items-center justify-center">
+                  {newQImage ? (
+                    <div className="w-full text-center">
+                      <img src={newQImage} alt="Table preview" className="max-h-48 mx-auto rounded border bg-white shadow-sm mb-2 object-contain" />
+                      <button
+                        type="button"
+                        onClick={() => setNewQImage(null)}
+                        className="text-xs font-bold text-red-600 hover:text-red-800 bg-red-50 border border-red-200 px-3 py-1 rounded"
+                      >
+                        ✕ Remove Picture
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="cursor-pointer text-center w-full py-2 hover:bg-gray-100/70 rounded transition">
+                      <svg className="w-8 h-8 text-gray-400 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                      <span className="text-sm font-semibold text-blue-600 hover:underline">Upload Table Screenshot / Diagram</span>
+                      <p className="text-xs text-gray-500 mt-0.5">PNG, JPG, or WEBP</p>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = () => setNewQImage(reader.result as string);
+                          reader.readAsDataURL(file);
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-800 mb-1">

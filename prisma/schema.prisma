@@ -39,7 +39,8 @@ model Question {
   options      String? // JSON string for MCQ options
   correctAnswer String? // Answer text or index
   marks        Int        @default(1)
-  language     String? // Python, Java, MySQL (for coding)
+  language     String? // Python, Java, MySQL, SQL (for coding)
+  imageUrl     String? // Image URL or Base64 data for SQL table / diagram
 }
 
 model Student {
