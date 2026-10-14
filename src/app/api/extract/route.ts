@@ -72,9 +72,14 @@ export async function POST(req: NextRequest) {
     });
 
     const promptText = `
-      Extract EVERY SINGLE question from the provided document.
+      Extract EVERY SINGLE question from the provided document EXACTLY as written.
       Do not stop early. If there are 10 questions, extract all 10.
       Identify if the question is an MCQ (Multiple Choice Question) or a CODING question.
+      
+      CRITICAL FOR PATTERNS, CODE, AND FORMATTING:
+      - Preserve EXACT formatting, spaces, newlines, indents, and ASCII/star patterns (e.g., triangle patterns like *, **, ***, number pyramids, diagrams, or code snippets) exactly as they appear in the Word document.
+      - DO NOT flatten patterns or multi-line questions into a single line.
+      - In the "text" field, use literal newline characters (\\n) and indentation so the exact pattern or program structure is preserved verbatim.
       
       CRITICAL: For MCQ questions, you MUST extract and provide the 'options' array (e.g. ["A) Apple", "B) Banana", "C) Cherry", "D) Date"]). 
       If the document does not explicitly list options but expects a multiple-choice format, generate 4 plausible options for it, making sure one matches the correct answer. The 'options' array cannot be empty for MCQs.
@@ -82,7 +87,7 @@ export async function POST(req: NextRequest) {
       For coding questions, specify the language if mentioned.
       Return the data strictly conforming to the requested JSON schema array.
       
-      ${extractedText ? "Document Text: " + extractedText.substring(0, 30000) : ""}
+      ${extractedText ? "Document Text:\n" + extractedText.substring(0, 30000) : ""}
     `;
 
     console.log("=== EXTRACTION DEBUG ===");

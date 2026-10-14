@@ -219,7 +219,7 @@ export default function QuestionBank() {
                       {q.type}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900">
-                      <div className="font-medium mb-1">{q.text}</div>
+                      <div className="font-medium mb-1 whitespace-pre-wrap">{q.text}</div>
                       {q.options && q.options.length > 0 && (
                         <ul className="list-disc pl-5 text-gray-500 space-y-1">
                           {q.options.map((opt: string, i: number) => (

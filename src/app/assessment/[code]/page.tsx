@@ -16,6 +16,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
   
   // Results State
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isSubmittingState, setIsSubmittingState] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<any>(null);
   const isSubmitting = useRef(false);
   
@@ -229,7 +230,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
     }
 
     try {
-      setLoading(true);
+      setIsSubmittingState(true);
       const response = await fetch("/api/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -253,11 +254,13 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
       }
 
       setIsSubmitted(true);
+      localStorage.removeItem("currentStudentId");
     } catch (err: any) {
       alert("Error submitting test: " + err.message);
+      isSubmitting.current = false;
     } finally {
+      setIsSubmittingState(false);
       setLoading(false);
-      localStorage.removeItem("currentStudentId");
       const doc = document as any;
       if (doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement) {
         if (doc.exitFullscreen) doc.exitFullscreen().catch(console.error);
@@ -266,6 +269,16 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
       }
     }
   };
+
+  if (isSubmittingState) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 flex-col p-4 text-center">
+        <div className="w-14 h-14 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-6"></div>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Submitting Your Test...</h2>
+        <p className="text-gray-600 max-w-md">Saving your answers and recording results with the trainer. Please do not close or refresh this tab.</p>
+      </div>
+    );
+  }
 
   if (loading && !isSubmitted) return <div className="flex h-screen items-center justify-center">Loading...</div>;
   if (error) return <div className="flex h-screen items-center justify-center text-red-600">{error}</div>;
@@ -430,10 +443,10 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
             <div key={q.id} className="bg-white p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow border border-gray-200 relative overflow-hidden">
               <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
               <div className="flex justify-between items-start mb-6">
-                <h3 className="text-lg font-medium text-gray-900 leading-relaxed">
+                <div className="text-lg font-medium text-gray-900 leading-relaxed flex-1">
                   <span className="text-blue-600 font-bold mr-2 text-xl">Q{index + 1}.</span> 
-                  {q.text}
-                </h3>
+                  <span className="whitespace-pre-wrap font-sans">{q.text}</span>
+                </div>
                 <span className="text-xs font-bold text-gray-500 bg-gray-100 px-3 py-1.5 rounded-full whitespace-nowrap ml-4">
                   {q.marks} {q.marks === 1 ? 'Mark' : 'Marks'}
                 </span>

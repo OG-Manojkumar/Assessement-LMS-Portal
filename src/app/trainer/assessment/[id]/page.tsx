@@ -23,6 +23,7 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
   const [editDuration, setEditDuration] = useState("");
   const [editStatus, setEditStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isRegrading, setIsRegrading] = useState(false);
 
   const fetchAssessment = async () => {
     try {
@@ -71,10 +72,93 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
     setIsSaving(false);
   };
 
+  const handleRegradeAssessment = async (onlyFailed = true) => {
+    setIsRegrading(true);
+    try {
+      const res = await fetch("/api/results/regrade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assessmentId: id, onlyFailed })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        await fetchAssessment();
+        alert(`Successfully re-evaluated ${data.updatedCount} student submission(s) with AI!`);
+      } else {
+        alert("Failed to re-evaluate: " + (data.error || "Unknown error"));
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error re-evaluating submissions.");
+    }
+    setIsRegrading(false);
+  };
+
+  const handleRegradeStudent = async (resultId: string) => {
+    setIsRegrading(true);
+    try {
+      const res = await fetch("/api/results/regrade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resultId, onlyFailed: false })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const refreshed = await fetch(`/api/assessments/details/${id}`).then(r => r.json());
+        if (refreshed.assessment) {
+          setAssessment(refreshed.assessment);
+          const updatedStudent = refreshed.assessment.results.find((r: any) => r.id === resultId);
+          if (updatedStudent) {
+            setSelectedStudentResult({
+              ...updatedStudent,
+              parsedDetails: JSON.parse(updatedStudent.details)
+            });
+          }
+        }
+      } else {
+        alert("Failed to re-grade student: " + (data.error || "Unknown error"));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    setIsRegrading(false);
+  };
+
+  const handleManualOverride = async (resultId: string, questionId: string, isCorrect: boolean, marks: number) => {
+    try {
+      const res = await fetch("/api/results/regrade", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          resultId,
+          questionId,
+          isCorrect,
+          awardedMarks: isCorrect ? marks : 0,
+          feedback: isCorrect ? "Manually marked Correct by Trainer." : "Manually marked Wrong by Trainer."
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSelectedStudentResult((prev: any) => ({
+          ...prev,
+          score: data.result.score,
+          details: data.result.details,
+          parsedDetails: data.details
+        }));
+        await fetchAssessment();
+      }
+    } catch (err) {
+      console.error("Failed manual override:", err);
+    }
+  };
+
   if (loading) return <div className="p-8">Loading...</div>;
   if (!assessment) return <div className="p-8">Assessment not found.</div>;
 
   const maxScore = assessment.questions.reduce((total: any, q: any) => total + q.marks, 0);
+  const failedGradesCount = (assessment.results || []).filter((r: any) =>
+    r.details?.includes("Auto-grader failed") || r.details?.includes("Manual review required")
+  ).length;
 
   const filteredAndSortedResults = [...(assessment.results || [])]
     .filter((r: any) => {
@@ -156,6 +240,15 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
           </p>
         </div>
         <div className="flex space-x-3">
+          {failedGradesCount > 0 && (
+            <button
+              onClick={() => handleRegradeAssessment(true)}
+              disabled={isRegrading}
+              className="bg-amber-500 border border-amber-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-amber-600 transition flex items-center disabled:opacity-50"
+            >
+              {isRegrading ? "Re-evaluating..." : `Re-evaluate Failed AI (${failedGradesCount})`}
+            </button>
+          )}
           <button 
             onClick={handleDownloadCSV}
             className="bg-green-600 border border-green-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-green-700 transition flex items-center"
@@ -231,6 +324,9 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
               filteredAndSortedResults.map((result: any, index: number) => {
                 const details = JSON.parse(result.details);
                 const violations = details.meta?.violations || 0;
+                const needsManualReview =
+                  result.details?.includes("Auto-grader failed") ||
+                  result.details?.includes("Manual review required");
                 return (
                   <tr key={result.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 text-gray-500 font-medium">{index + 1}</td>
@@ -239,6 +335,11 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
                     <td className="px-6 py-4 text-gray-500">{result.student.mobile}</td>
                     <td className="px-6 py-4">
                       <span className="font-bold text-blue-600">{result.score}</span> <span className="text-gray-400">/ {maxScore}</span>
+                      {needsManualReview && (
+                        <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800">
+                          Needs Review
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       {violations > 0 ? (
@@ -351,12 +452,21 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
                 <h2 className="text-2xl font-bold text-gray-900">{selectedStudentResult.student.name}'s Answers</h2>
                 <p className="text-gray-500 text-sm mt-1">Score: {selectedStudentResult.score} / {maxScore}</p>
               </div>
-              <button 
-                onClick={() => setSelectedStudentResult(null)}
-                className="text-gray-500 hover:text-gray-800 p-2"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => handleRegradeStudent(selectedStudentResult.id)}
+                  disabled={isRegrading}
+                  className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-indigo-700 transition disabled:opacity-50"
+                >
+                  {isRegrading ? "Re-grading..." : "Re-evaluate with AI"}
+                </button>
+                <button 
+                  onClick={() => setSelectedStudentResult(null)}
+                  className="text-gray-500 hover:text-gray-800 p-2"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
             </div>
             
             <div className="p-6 overflow-y-auto space-y-6 flex-1">
@@ -364,11 +474,35 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
                 const res = selectedStudentResult.parsedDetails[q.id] || { studentAnswer: "No Answer", isCorrect: false, awardedMarks: 0, feedback: "" };
                 return (
                   <div key={q.id} className={`bg-white p-6 rounded-xl border ${res.isCorrect ? 'border-green-300' : 'border-red-300'} shadow-sm`}>
-                    <div className="flex justify-between items-start mb-4">
-                      <h3 className="text-lg font-medium text-gray-900 font-bold">Q{index + 1}. {q.text}</h3>
-                      <span className={`px-3 py-1 rounded text-sm font-bold ${res.isCorrect ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                        {res.awardedMarks} / {q.marks} Marks
-                      </span>
+                    <div className="flex justify-between items-start mb-4 gap-4">
+                      <h3 className="text-lg font-medium text-gray-900 font-bold whitespace-pre-wrap flex-1">Q{index + 1}. {q.text}</h3>
+                      <div className="flex items-center space-x-2 shrink-0">
+                        <button
+                          onClick={() => handleManualOverride(selectedStudentResult.id, q.id, true, q.marks)}
+                          className={`px-2.5 py-1 rounded text-xs font-bold border transition ${
+                            res.isCorrect
+                              ? "bg-green-600 text-white border-green-600"
+                              : "bg-white text-green-700 border-green-300 hover:bg-green-50"
+                          }`}
+                          title="Manually mark as Correct"
+                        >
+                          ✓ Mark Correct
+                        </button>
+                        <button
+                          onClick={() => handleManualOverride(selectedStudentResult.id, q.id, false, q.marks)}
+                          className={`px-2.5 py-1 rounded text-xs font-bold border transition ${
+                            !res.isCorrect
+                              ? "bg-red-600 text-white border-red-600"
+                              : "bg-white text-red-700 border-red-300 hover:bg-red-50"
+                          }`}
+                          title="Manually mark as Wrong"
+                        >
+                          ✕ Mark Wrong
+                        </button>
+                        <span className={`px-3 py-1 rounded text-sm font-bold ${res.isCorrect ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                          {res.awardedMarks} / {q.marks} Marks
+                        </span>
+                      </div>
                     </div>
                     
                     <div className="mb-4">
@@ -382,7 +516,7 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
 
                     <div className="mb-4">
                       <p className="text-sm text-gray-500 mb-1">Correct Answer / Reference:</p>
-                      <div className="font-medium text-green-700 bg-green-50 p-2 rounded">{q.correctAnswer}</div>
+                      <div className="font-medium text-green-700 bg-green-50 p-2 rounded whitespace-pre-wrap">{q.correctAnswer}</div>
                     </div>
 
                     {q.type === 'CODING' && res.feedback && (
@@ -470,10 +604,10 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
                   ) : (
                     <div>
                       <div className="flex justify-between items-start mb-2">
-                        <h4 className="font-bold text-gray-900">
+                        <div className="font-bold text-gray-900 whitespace-pre-wrap flex-1">
                           <span className="text-blue-600 mr-2">Q{index+1}.</span> 
                           {q.text}
-                        </h4>
+                        </div>
                         <button 
                           className="text-blue-600 hover:text-blue-800 bg-blue-50 px-3 py-1 rounded text-sm font-medium transition" 
                           onClick={() => setEditingQuestion(q)}
