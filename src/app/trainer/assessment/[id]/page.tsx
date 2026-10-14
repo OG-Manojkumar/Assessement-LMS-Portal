@@ -556,6 +556,46 @@ export default function AssessmentResults({ params }: { params: Promise<{ id: st
               </button>
             </div>
             
+            {/* Quick banner to apply 1 SQL Table image to all SQL questions in this assessment */}
+            <div className="p-4 bg-blue-50/70 border-b border-blue-100 flex flex-col md:flex-row items-center justify-between gap-4">
+              <div>
+                <span className="text-[11px] font-black uppercase tracking-wider text-blue-800 bg-blue-100 px-2 py-0.5 rounded">
+                  SQL Table Feature
+                </span>
+                <p className="text-sm font-bold text-gray-900 mt-1">Upload SQL Table Picture for All Queries</p>
+                <p className="text-xs text-gray-500">Apply one schema/dataset image to all SQL questions in this assessment.</p>
+              </div>
+              <label className="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition shadow-sm whitespace-nowrap">
+                Upload & Apply to All SQL
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = async () => {
+                      const dataUrl = reader.result as string;
+                      const res = await fetch("/api/questions/apply-sql-image", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ assessmentId: id, imageUrl: dataUrl })
+                      });
+                      const data = await res.json();
+                      if (res.ok) {
+                        alert(`Successfully attached table picture to ${data.updatedCount} SQL questions!`);
+                        fetchAssessment();
+                      } else {
+                        alert("Failed to apply image");
+                      }
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                />
+              </label>
+            </div>
+
             <div className="p-6 overflow-y-auto flex-1 space-y-4">
               {assessment.questions.map((q: any, index: number) => (
                 <div key={q.id} className="border border-gray-200 p-4 rounded-lg bg-gray-50 flex flex-col">

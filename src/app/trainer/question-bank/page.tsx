@@ -24,6 +24,31 @@ export default function QuestionBank() {
   const [newQCorrect, setNewQCorrect] = useState("");
   const [newQOptions, setNewQOptions] = useState(""); // comma separated
   const [newQImage, setNewQImage] = useState<string | null>(null);
+  const [globalSqlTableImage, setGlobalSqlTableImage] = useState<string | null>(null);
+
+  const handleSqlTableUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setGlobalSqlTableImage(dataUrl);
+      setExtractedQuestions((prev) =>
+        prev.map((q) => {
+          const isSql =
+            q.language === "SQL" ||
+            q.language === "MySQL" ||
+            q.text?.toLowerCase().includes("sql") ||
+            q.text?.toLowerCase().includes("table");
+          if (isSql) {
+            return { ...q, imageUrl: dataUrl };
+          }
+          return q;
+        })
+      );
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -48,7 +73,19 @@ export default function QuestionBank() {
         throw new Error(data.error || "Failed to extract questions");
       }
 
-      setExtractedQuestions(data.questions || []);
+      const extracted = (data.questions || []).map((q: any) => {
+        const isSql =
+          q.language === "SQL" ||
+          q.language === "MySQL" ||
+          q.text?.toLowerCase().includes("sql") ||
+          q.text?.toLowerCase().includes("table");
+        if (isSql && globalSqlTableImage) {
+          return { ...q, imageUrl: globalSqlTableImage };
+        }
+        return q;
+      });
+
+      setExtractedQuestions(extracted);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -59,6 +96,12 @@ export default function QuestionBank() {
   const handleAddQuestion = () => {
     if (!newQText || !newQCorrect) return alert("Please fill all required fields");
     
+    const isSql =
+      newQLanguage === "SQL" ||
+      newQLanguage === "MySQL" ||
+      newQText.toLowerCase().includes("sql") ||
+      newQText.toLowerCase().includes("table");
+
     const question = {
       type: newQType,
       text: newQText,
@@ -66,7 +109,7 @@ export default function QuestionBank() {
       correctAnswer: newQCorrect,
       language: newQType === "CODING" ? newQLanguage : null,
       options: newQType === "MCQ" ? newQOptions.split(",").map(s => s.trim()).filter(Boolean) : [],
-      imageUrl: newQImage
+      imageUrl: newQImage || (isSql ? globalSqlTableImage : null)
     };
 
     if (editIndex !== null) {
@@ -116,7 +159,17 @@ export default function QuestionBank() {
         body: JSON.stringify({
           title: assessmentTitle,
           duration: parseInt(assessmentDuration),
-          questions: extractedQuestions
+          questions: extractedQuestions.map((q) => {
+            const isSql =
+              q.language === "SQL" ||
+              q.language === "MySQL" ||
+              q.text?.toLowerCase().includes("sql") ||
+              q.text?.toLowerCase().includes("table");
+            return {
+              ...q,
+              imageUrl: q.imageUrl || (isSql ? globalSqlTableImage : null)
+            };
+          })
         }),
       });
       const data = await response.json();
@@ -139,26 +192,85 @@ export default function QuestionBank() {
         </div>
       </header>
 
-      {/* Upload Zone */}
-      <div className="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center bg-white hover:bg-gray-50 transition-colors cursor-pointer relative">
-        <input 
-          type="file" 
-          accept=".docx,.pdf,.odt" 
-          onChange={handleFileUpload}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-          disabled={isUploading}
-        />
-        <div className="pointer-events-none">
-          <svg className="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
-            <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <p className="mt-4 flex text-sm text-gray-600 justify-center">
-            <span className="font-semibold text-blue-600 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
-              {isUploading ? "Extracting Questions using AI..." : "Upload a file"}
-            </span>
-            <span className="pl-1">or drag and drop</span>
-          </p>
-          <p className="text-xs text-gray-500 mt-2">DOCX, PDF, or ODT up to 10MB</p>
+      {/* Upload Zone & SQL Table Image */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        {/* Document Upload */}
+        <div className="lg:col-span-2 border-2 border-dashed border-gray-300 rounded-2xl p-8 text-center bg-white hover:bg-slate-50/70 transition-all cursor-pointer relative shadow-sm flex flex-col justify-center">
+          <input 
+            type="file" 
+            accept=".docx,.pdf,.odt" 
+            onChange={handleFileUpload}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            disabled={isUploading}
+          />
+          <div className="pointer-events-none">
+            <svg className="mx-auto h-12 w-12 text-indigo-500 mb-2" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+              <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <p className="flex text-sm text-gray-700 justify-center font-medium">
+              <span className="font-bold text-indigo-600">
+                {isUploading ? "Extracting Questions using AI..." : "Upload Questions Document"}
+              </span>
+              <span className="pl-1">or drag and drop</span>
+            </p>
+            <p className="text-xs text-gray-500 mt-1">DOCX, PDF, or ODT up to 10MB</p>
+          </div>
+        </div>
+
+        {/* SQL Table Image Upload (Applicable to all SQL queries) */}
+        <div className="border-2 border-dashed border-blue-300 bg-blue-50/40 rounded-2xl p-6 text-center shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-center mb-1">
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-black bg-blue-100 text-blue-800">
+                SQL SCHEMA / TABLE
+              </span>
+            </div>
+            <h3 className="font-bold text-gray-900 text-sm mt-1">Upload SQL Table Picture</h3>
+            <p className="text-xs text-slate-500 mt-1">
+              Upload 1 table picture here — it will <strong className="text-blue-700">automatically apply to all SQL queries</strong> in this test.
+            </p>
+          </div>
+
+          <div className="my-3">
+            {globalSqlTableImage ? (
+              <div className="bg-white p-2.5 rounded-xl border border-blue-200 shadow-sm text-center">
+                <img src={globalSqlTableImage} alt="SQL Table schema" className="max-h-28 mx-auto object-contain rounded" />
+                <div className="mt-2.5 flex items-center justify-between px-2 pt-1 border-t border-gray-100">
+                  <span className="text-xs font-bold text-emerald-600 flex items-center">
+                    ✓ Applied to all SQL
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGlobalSqlTableImage(null);
+                      setExtractedQuestions(prev => prev.map(q => {
+                        const isSql = q.language === "SQL" || q.language === "MySQL" || q.text?.toLowerCase().includes("sql") || q.text?.toLowerCase().includes("table");
+                        if (isSql && q.imageUrl === globalSqlTableImage) {
+                          return { ...q, imageUrl: null };
+                        }
+                        return q;
+                      }));
+                    }}
+                    className="text-xs font-bold text-red-600 hover:text-red-800 bg-red-50 px-2 py-0.5 rounded"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <label className="cursor-pointer block border border-dashed border-blue-300 rounded-xl p-4 bg-white hover:bg-blue-50/60 transition shadow-sm">
+                <svg className="w-8 h-8 text-blue-500 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                <span className="text-xs font-bold text-blue-600 block">Click to Select Table Screenshot</span>
+                <span className="text-[11px] text-gray-400">PNG, JPG, or WEBP</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleSqlTableUpload}
+                  className="hidden"
+                />
+              </label>
+            )}
+          </div>
         </div>
       </div>
 

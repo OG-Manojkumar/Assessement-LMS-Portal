@@ -43,38 +43,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unsupported file type. Use PDF, DOCX, or ODT." }, { status: 400 });
     }
 
-    // 2. Send to Gemini for structured extraction
-    const model = genAI.getGenerativeModel({
-      model: "gemini-flash-lite-latest",
-      generationConfig: {
-        maxOutputTokens: 8192, // Ensure it has enough space to return all 10+ questions
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: SchemaType.ARRAY,
-          items: {
-            type: SchemaType.OBJECT,
-            properties: {
-              type: { type: SchemaType.STRING, description: "Must be 'MCQ' or 'CODING'" },
-              text: { type: SchemaType.STRING, description: "The main question text" },
-              options: { 
-                type: SchemaType.ARRAY, 
-                items: { type: SchemaType.STRING },
-                description: "Array of options if it is an MCQ, empty if coding."
-              },
-              correctAnswer: { type: SchemaType.STRING, description: "The correct option or answer text" },
-              marks: { type: SchemaType.INTEGER, description: "Suggested marks, default to 1 if not specified" },
-              language: { type: SchemaType.STRING, description: "Python, Java, or MySQL if it's a coding question, else null" }
+    const models = ["gemini-3.1-flash-lite-preview", "gemini-3-flash-preview", "gemini-3.5-flash"];
+    const generationConfig: any = {
+      maxOutputTokens: 8192,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: SchemaType.ARRAY,
+        items: {
+          type: SchemaType.OBJECT,
+          properties: {
+            type: { type: SchemaType.STRING, description: "Must be 'MCQ' or 'CODING'" },
+            text: { type: SchemaType.STRING, description: "The main question text" },
+            options: { 
+              type: SchemaType.ARRAY, 
+              items: { type: SchemaType.STRING },
+              description: "Array of options if it is an MCQ, empty if coding."
             },
-            required: ["type", "text", "correctAnswer", "marks"]
-          }
+            correctAnswer: { type: SchemaType.STRING, description: "The correct option or answer text" },
+            marks: { type: SchemaType.INTEGER, description: "Suggested marks, default to 1 if not specified" },
+            language: { type: SchemaType.STRING, description: "Python, Java, SQL, or MySQL if it's a coding or query question, else null" }
+          },
+          required: ["type", "text", "correctAnswer", "marks"]
         }
       }
-    });
+    };
 
     const promptText = `
       Extract EVERY SINGLE question from the provided document EXACTLY as written.
       Do not stop early. If there are 10 questions, extract all 10.
-      Identify if the question is an MCQ (Multiple Choice Question) or a CODING question.
+      Identify if the question is an MCQ (Multiple Choice Question) or a CODING/SQL question.
       
       CRITICAL FOR PATTERNS, CODE, AND FORMATTING:
       - Preserve EXACT formatting, spaces, newlines, indents, and ASCII/star patterns (e.g., triangle patterns like *, **, ***, number pyramids, diagrams, or code snippets) exactly as they appear in the Word document.
@@ -84,7 +81,7 @@ export async function POST(req: NextRequest) {
       CRITICAL: For MCQ questions, you MUST extract and provide the 'options' array (e.g. ["A) Apple", "B) Banana", "C) Cherry", "D) Date"]). 
       If the document does not explicitly list options but expects a multiple-choice format, generate 4 plausible options for it, making sure one matches the correct answer. The 'options' array cannot be empty for MCQs.
       
-      For coding questions, specify the language if mentioned.
+      For coding or database query questions, specify the language: "Python", "Java", "SQL", or "MySQL".
       Return the data strictly conforming to the requested JSON schema array.
       
       ${extractedText ? "Document Text:\n" + extractedText.substring(0, 30000) : ""}
@@ -98,23 +95,23 @@ export async function POST(req: NextRequest) {
 
     const requestParts = [promptText, ...inlineParts];
 
-    // Simple retry mechanism for 503 Service Unavailable errors
-    let retries = 5;
     let text = "";
-    while (retries > 0) {
+    for (const modelName of models) {
       try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig
+        });
         const result = await model.generateContent(requestParts);
         text = result.response.text();
-        break; // Success
+        if (text) break;
       } catch (err: any) {
-        if (err.message && err.message.includes("503") && retries > 1) {
-          retries--;
-          console.log(`Hit 503 error. Retrying in 5 seconds... (${retries} retries left)`);
-          await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5s before retry
-          continue;
-        }
-        throw err;
+        console.warn(`Extraction with ${modelName} failed, trying next:`, err?.message || err);
       }
+    }
+
+    if (!text) {
+      throw new Error("Unable to extract questions from file using AI. Please try again or add questions manually.");
     }
     
     // Parse the returned JSON
