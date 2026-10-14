@@ -132,8 +132,8 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
       } else {
         setIsFullscreen(true);
         try {
-          if ((navigator as any).keyboard && (navigator as any).keyboard.lock) {
-            (navigator as any).keyboard.lock(["Escape"]);
+          if (typeof navigator !== "undefined" && (navigator as any).keyboard?.lock) {
+            (navigator as any).keyboard.lock(["Escape"]).catch(() => {});
           }
         } catch (_) {}
       }
@@ -231,11 +231,6 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
     if (req) {
       req.call(el).then(() => {
         setIsFullscreen(true);
-        try {
-          if ((navigator as any).keyboard && (navigator as any).keyboard.lock) {
-            (navigator as any).keyboard.lock(["Escape"]);
-          }
-        } catch (_) {}
       }).catch((err: any) => {
         console.error("Fullscreen request failed:", err);
         setIsFullscreen(true);
