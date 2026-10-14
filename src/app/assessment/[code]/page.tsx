@@ -29,6 +29,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
   const [runOutputs, setRunOutputs] = useState<Record<string, string>>({});
   const [isRunning, setIsRunning] = useState<Record<string, boolean>>({});
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [showSchemaInEditor, setShowSchemaInEditor] = useState<Record<string, boolean>>({});
 
   const fetchAssessment = async () => {
     try {
@@ -508,13 +509,33 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
                 </div>
               ) : (
                 <div className="mt-4 bg-gray-900 rounded-xl overflow-hidden border border-gray-800 shadow-inner">
-                  <div className="flex justify-between items-center px-4 py-3 bg-gray-950 border-b border-gray-800">
-                    <div className="flex space-x-2">
-                      <div className="w-3 h-3 rounded-full bg-red-500/80"></div>
-                      <div className="w-3 h-3 rounded-full bg-yellow-500/80"></div>
-                      <div className="w-3 h-3 rounded-full bg-green-500/80"></div>
+                  <div className="flex justify-between items-center px-4 py-3 bg-gray-950 border-b border-gray-800 flex-wrap gap-2">
+                    <div className="flex items-center space-x-3">
+                      <div className="flex space-x-2">
+                        <div className="w-3 h-3 rounded-full bg-red-500/80"></div>
+                        <div className="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+                        <div className="w-3 h-3 rounded-full bg-green-500/80"></div>
+                      </div>
+                      <span className="text-xs font-semibold text-gray-400">
+                        {(selectedLanguage[q.id] || q.language || "Python").toUpperCase()} Query Editor
+                      </span>
                     </div>
                     <div className="flex items-center space-x-3">
+                      {q.imageUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setShowSchemaInEditor(prev => ({ ...prev, [q.id]: prev[q.id] === false ? true : false }))}
+                          className={`text-xs font-semibold px-2.5 py-1 rounded border transition flex items-center space-x-1.5 ${
+                            showSchemaInEditor[q.id] !== false
+                              ? 'bg-blue-600/30 text-blue-300 border-blue-500/50 hover:bg-blue-600/40'
+                              : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700'
+                          }`}
+                          title="Toggle Table Schema view in editor"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                          <span>{showSchemaInEditor[q.id] !== false ? "📊 Hide Table Schema" : "📊 Show Table Schema"}</span>
+                        </button>
+                      )}
                       <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Language:</span>
                       <select 
                         value={selectedLanguage[q.id] || q.language || "Python"} 
@@ -529,6 +550,38 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
                       </select>
                     </div>
                   </div>
+
+                  {/* Reflected Table Schema directly inside the Query Editor */}
+                  {q.imageUrl && showSchemaInEditor[q.id] !== false && (
+                    <div className="bg-gray-950/90 border-b border-gray-800 p-3">
+                      <div className="flex items-center justify-between mb-2 px-1">
+                        <div className="flex items-center space-x-2 text-xs font-semibold text-blue-400">
+                          <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                          <span>Table Schema & Sample Data Reference</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewImage(q.imageUrl)}
+                          className="text-[11px] font-bold bg-blue-600/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded hover:bg-blue-600/40 transition flex items-center space-x-1"
+                        >
+                          <span>🔍 Enlarge Fullscreen</span>
+                        </button>
+                      </div>
+                      <div 
+                        className="bg-black/60 rounded-lg p-2 border border-gray-800 max-h-60 overflow-auto flex justify-center cursor-pointer group"
+                        onClick={() => setPreviewImage(q.imageUrl)}
+                        title="Click to zoom in full size"
+                      >
+                        <img
+                          src={q.imageUrl}
+                          alt="SQL Table Reference"
+                          className="max-h-56 w-auto object-contain rounded group-hover:scale-[1.01] transition-transform"
+                        />
+                      </div>
+                      <p className="text-center text-[10px] text-gray-500 mt-1 italic">Click image to enlarge without leaving exam</p>
+                    </div>
+                  )}
+
                   <textarea
                     value={answers[q.id] || ""}
                     onChange={(e) => setAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
@@ -562,7 +615,12 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
                           const res = await fetch("/api/run-code", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ code, language: lang, questionText: q.text })
+                            body: JSON.stringify({ 
+                              code, 
+                              language: lang, 
+                              questionText: q.text,
+                              imageUrl: q.imageUrl 
+                            })
                           });
                           const data = await res.json();
                           setRunOutputs(prev => ({ ...prev, [q.id]: data.output || "No output." }));

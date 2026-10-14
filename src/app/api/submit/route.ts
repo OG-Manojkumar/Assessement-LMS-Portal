@@ -38,8 +38,8 @@ export async function POST(req: NextRequest) {
     let totalScore = 0;
     const detailedResults: any = { meta: { violations } };
 
-    // Helper function to call Gemini with working models and strict 6-second timeout
-    const generateWithTimeout = async (prompt: string, timeoutMs = 6000) => {
+    // Helper function to call Gemini with working models and timeout
+    const generateWithTimeout = async (prompt: string, inlineParts: any[] = [], timeoutMs = 12000) => {
       const models = [
         "gemini-3.1-flash-lite-preview",
         "gemini-3-flash-preview",
@@ -49,7 +49,8 @@ export async function POST(req: NextRequest) {
       for (const modelName of models) {
         try {
           const model = genAI.getGenerativeModel({ model: modelName });
-          const generatePromise = model.generateContent(prompt).then((r) => r.response.text());
+          const contentParts = inlineParts.length > 0 ? [prompt, ...inlineParts] : prompt;
+          const generatePromise = model.generateContent(contentParts).then((r) => r.response.text());
           const timeoutPromise = new Promise<string>((_, reject) =>
             setTimeout(() => reject(new Error("AI timeout")), timeoutMs)
           );
@@ -103,7 +104,8 @@ export async function POST(req: NextRequest) {
             language: question.language || "Any",
             correctAnswer: question.correctAnswer,
             marks: question.marks,
-            studentAnswer
+            studentAnswer,
+            imageUrl: question.imageUrl
           });
         }
       }
@@ -111,9 +113,25 @@ export async function POST(req: NextRequest) {
 
     // 2.5. Fast batch grade all CODING questions in a SINGLE quick Gemini call
     if (codingQuestionsToGrade.length > 0) {
+      // Find table schema image if available
+      const firstImage = codingQuestionsToGrade.find(q => q.imageUrl && q.imageUrl.startsWith("data:"))?.imageUrl;
+      const inlineParts: any[] = [];
+      if (firstImage) {
+        const matches = firstImage.match(/^data:([a-zA-Z0-9\/+-]+);base64,(.+)$/);
+        if (matches) {
+          inlineParts.push({
+            inlineData: {
+              mimeType: matches[1],
+              data: matches[2]
+            }
+          });
+        }
+      }
+
       const batchPrompt = `
 You are an automated programming & SQL assessment grader.
-Evaluate each of the following coding questions and the student's submitted solution.
+Evaluate each of the following coding / SQL questions and the student's submitted solution.
+${inlineParts.length > 0 ? "For SQL questions, the attached image contains the database tables, schema, and column names. Verify the student's query logic, column names, and conditions strictly against the tables shown in the image." : ""}
 Ignore minor formatting differences or language header comments like [Language: Python]. Focus on whether the logic/query solves the question correctly.
 
 Questions to evaluate:
@@ -139,7 +157,7 @@ Respond STRICTLY in valid JSON format as an object mapping each "questionId" to 
       let batchSucceeded = false;
 
       try {
-        const responseText = await generateWithTimeout(batchPrompt, 6000);
+        const responseText = await generateWithTimeout(batchPrompt, inlineParts, 12000);
         const jsonMatch = responseText.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           batchGrades = JSON.parse(jsonMatch[0]);
