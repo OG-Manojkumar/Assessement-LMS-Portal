@@ -28,6 +28,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
   const [selectedLanguage, setSelectedLanguage] = useState<Record<string, string>>({});
   const [runOutputs, setRunOutputs] = useState<Record<string, string>>({});
   const [isRunning, setIsRunning] = useState<Record<string, boolean>>({});
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   const fetchAssessment = async () => {
     try {
@@ -462,21 +463,24 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
                     </span>
                     <button
                       type="button"
-                      onClick={() => window.open(q.imageUrl, '_blank')}
-                      className="text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline"
+                      onClick={() => setPreviewImage(q.imageUrl)}
+                      className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded transition"
                     >
-                      Open Full Size ↗
+                      🔍 Click to Zoom In
                     </button>
                   </div>
-                  <div className="flex justify-center bg-white rounded-lg border border-slate-200 p-2 overflow-hidden">
+                  <div 
+                    className="flex justify-center bg-white rounded-lg border border-slate-200 p-2 overflow-hidden cursor-pointer group"
+                    onClick={() => setPreviewImage(q.imageUrl)}
+                    title="Click to zoom in"
+                  >
                     <img
                       src={q.imageUrl}
                       alt="Question table reference"
-                      className="max-h-80 w-auto object-contain cursor-pointer hover:opacity-95 transition"
-                      onClick={() => window.open(q.imageUrl, '_blank')}
-                      title="Click to view full image in new tab"
+                      className="max-h-80 w-auto object-contain rounded group-hover:scale-[1.01] transition-transform"
                     />
                   </div>
+                  <p className="text-center text-[11px] text-gray-400 mt-1.5 italic">Click the table picture above to enlarge</p>
                 </div>
               )}
 
@@ -621,6 +625,39 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
               >
                 Yes, Submit
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Safe In-Page Lightbox for Table Schema (No tab switch / malpractice) */}
+      {previewImage && (
+        <div 
+          className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 cursor-pointer"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div 
+            className="relative max-w-5xl w-full max-h-[92vh] bg-white rounded-2xl p-4 shadow-2xl overflow-auto flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-3 pb-2 border-b border-gray-100">
+              <div className="flex items-center space-x-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+                <span className="font-bold text-gray-900 text-sm">Reference SQL Table / Dataset</span>
+              </div>
+              <button 
+                onClick={() => setPreviewImage(null)}
+                className="text-xs font-bold text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition"
+              >
+                ✕ Close Preview
+              </button>
+            </div>
+            <div className="flex justify-center items-center overflow-auto flex-1 p-2">
+              <img 
+                src={previewImage} 
+                alt="Enlarged Reference Table" 
+                className="max-h-[78vh] w-auto object-contain rounded-lg shadow-sm border border-gray-100"
+              />
             </div>
           </div>
         </div>

@@ -17,7 +17,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ code
             text: true,
             options: true,
             marks: true,
-            language: true
+            language: true,
+            imageUrl: true
             // DELIBERATELY EXCLUDING correctAnswer so students can't inspect element and cheat!
           }
         }
